@@ -1,5 +1,6 @@
 """Concise daemon logs plus kernel-to-daemon plugin lifecycle events."""
 import json
+from copy import copy
 import logging
 import os
 import re
@@ -11,7 +12,20 @@ SENSITIVE = re.compile(r'password|passwd|secret|token|authorization|api[_-]?key'
 
 
 class ConsoleFormatter(logging.Formatter):
+    COLORS = {logging.DEBUG: 36, logging.INFO: 32, logging.WARNING: 33,
+              logging.ERROR: 31, logging.CRITICAL: 91}
+
+    def __init__(self, *args, use_colors=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.use_colors = (sys.stderr.isatty() and 'NO_COLOR' not in os.environ
+                           and os.environ.get('TERM') != 'dumb') if use_colors is None else use_colors
+
     def format(self, record):
+        record = copy(record)
+        level = record.levelname
+        color = self.COLORS.get(record.levelno)
+        label = f"\033[{color}m{level}\033[0m" if self.use_colors and color else level
+        record.level_label = label + ' ' * max(0, 7 - len(level))
         record.source = {"ai_runtime": "runtime", "uvicorn": "server", "uvicorn.error": "server", "uvicorn.access": "http"}.get(record.name, record.name)
         return super().format(record)
 
@@ -20,7 +34,7 @@ def configure_logging(include_server=False):
     if not any(getattr(h, '_runtime_handler', False) for h in LOGGER.handlers):
         handler = logging.StreamHandler(sys.stderr)
         handler._runtime_handler = True
-        handler.setFormatter(ConsoleFormatter('%(asctime)s %(levelname)-7s [%(source)s] %(message)s', '%H:%M:%S'))
+        handler.setFormatter(ConsoleFormatter('%(asctime)s %(level_label)s [%(source)s] %(message)s', '%H:%M:%S'))
         LOGGER.addHandler(handler)
     LOGGER.setLevel(logging.INFO)
     if include_server:
