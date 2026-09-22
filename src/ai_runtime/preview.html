@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Runtime · Live Preview</title>
+<style>
+:root{color-scheme:dark;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;color:#e9f2ff;background:#050811}
+*{box-sizing:border-box}body{margin:0}header{height:86px;display:flex;align-items:center;justify-content:space-between;padding:0 34px;border-bottom:1px solid #1a2233;background:#090e19}
+.brand{font-size:12px;letter-spacing:3px;color:#72e6d3}.brand b{color:white;font-size:17px;letter-spacing:0;margin-right:22px}
+.connection{font:12px monospace;color:#8e9bb1}.connection.connected{color:#72e6b3}
+main{display:grid;grid-template-columns:minmax(0,1fr) 320px;min-height:calc(100vh - 86px)}
+.stage{position:relative;min-height:600px;overflow:hidden}canvas{display:block;width:100%;height:100%;position:absolute}
+.overlay{position:absolute;top:32px;left:34px;pointer-events:none}.eyebrow{font:11px monospace;color:#687c97;letter-spacing:3px}
+h1{font-weight:400;letter-spacing:5px;font-size:clamp(19px,2.4vw,32px);margin:14px 0}.sub{font-size:12px;color:#6f849e}
+.footer{position:absolute;bottom:28px;left:34px;right:34px;display:flex;justify-content:space-between;align-items:center;font:11px monospace;color:#668095}
+button{border:1px solid #304052;background:#101927;color:#bdd6e6;padding:9px 14px;border-radius:7px;cursor:pointer}
+aside{padding:30px 22px;border-left:1px solid #1a2233;background:#090e19}
+h2{font-weight:500;font-size:15px;margin:0 0 10px}.help{font-size:12px;line-height:1.8;color:#7c8ba2;margin-bottom:26px}
+.metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:32px}.metric{background:#111927;border:1px solid #1d2a3d;border-radius:10px;padding:14px}
+.metric label{display:block;color:#7f93ae;font-size:11px;margin-bottom:9px}.metric strong{font:22px monospace;color:#cee8ff}
+.log{padding:14px 0;border-bottom:1px solid #1c2635}.log small{font:10px monospace;color:#658f9e}.log p{font-size:13px;line-height:1.7;margin:6px 0;color:#d0dce9}.log code{font:10px monospace;color:#6c879e;word-break:break-all}
+#history{max-height:calc(100vh - 425px);overflow:auto;min-height:160px}.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:7px}
+@media(max-width:850px){main{grid-template-columns:1fr}.stage{height:65vh;min-height:440px}aside{border-left:0;border-top:1px solid #1a2233}.metrics{grid-template-columns:repeat(4,1fr)}#history{max-height:240px}header{padding:0 20px}.brand{letter-spacing:1px}.brand b{margin-right:12px}}
+</style>
+<header><div class="brand"><b>AI RUNTIME</b>LIVE PREVIEW</div><div id="connection" class="connection"><span class="dot"></span>连接中</div></header>
+<main><section class="stage"><canvas id="scene"></canvas><div class="overlay"><div class="eyebrow">GENERATIVE FIELD / 001</div><h1 id="title">NEON SINGULARITY</h1><div class="sub">移动鼠标扰动星轨 · Python 修改实时同步</div></div><div class="footer"><span id="telemetry">等待场景状态</span><button id="pause">暂停动画</button></div></section>
+<aside><h2>实时场景</h2><p class="help">保持此页面打开。AI 每次修改都会直接显示在画面中，无需刷新。</p><div class="metrics"><div class="metric"><label>粒子数量</label><strong id="particles">—</strong></div><div class="metric"><label>旋转速度</label><strong id="speed">—</strong></div><div class="metric"><label>色相</label><strong id="hue">—</strong></div><div class="metric"><label>版本</label><strong id="revision">—</strong></div></div><h2>操作记录</h2><div id="history"><p class="help">等待 Python 发送修改…</p></div></aside></main>
+<script>
+const $=id=>document.getElementById(id);
+let state={hue:190,speed:.65,particles:650,glow:.8,rings:5,spread:1,title:"NEON SINGULARITY"};
+let revision=-1,paused=false,phase=0,last=performance.now(),fps=60,connected=false;
+const token=location.hash.slice(1),canvas=$('scene'),ctx=canvas.getContext('2d');
+let width=1,height=1,dpr=1,mx=0,my=0,tx=0,ty=0;
+function resize(){const r=canvas.parentElement.getBoundingClientRect();width=r.width;height=r.height;dpr=Math.min(devicePixelRatio||1,2);canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+new ResizeObserver(resize).observe(canvas.parentElement);
+canvas.addEventListener('pointermove',e=>{const r=canvas.getBoundingClientRect();tx=(e.clientX-r.left-width/2)/width;ty=(e.clientY-r.top-height/2)/height});
+canvas.addEventListener('pointerleave',()=>{tx=ty=0});
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'继续动画':'暂停动画'};
+function status(text,ok){$('connection').textContent=(ok?'● ':'○ ')+text;$('connection').classList.toggle('connected',ok);connected=ok}
+let retry=500;
+function connect(){
+ if(!token){status('缺少预览凭证，请使用 Python 返回的完整链接',false);return}
+ const ws=new WebSocket('ws://'+location.host+'/ws');
+ ws.onopen=()=>ws.send(JSON.stringify({token}));
+ ws.onmessage=e=>{
+  const data=JSON.parse(e.data);state=data.state;revision=data.revision;retry=500;status('已连接 · 实时同步',true);
+  $('title').textContent=state.title;
+  for(const id of ['particles','hue'])$(''+id).textContent=state[id];
+  $('speed').textContent=Number(state.speed).toFixed(2)+'×';$('revision').textContent=String(revision).padStart(2,'0');
+  $('history').replaceChildren();
+  for(const item of [...data.history].reverse()){
+   const row=document.createElement('div');row.className='log';
+   const time=document.createElement('small');time.textContent='#'+item.revision+' / '+new Date(item.time*1000).toLocaleTimeString();
+   const text=document.createElement('p');text.textContent=item.message;
+   const changes=document.createElement('code');changes.textContent=Object.entries(item.changes).map(([k,v])=>k+' → '+v).join(' · ');
+   row.append(time,text,changes);$('history').append(row);
+  }
+ };
+ ws.onclose=e=>{if(e.code===1008){status('预览凭证无效，请重新获取链接',false);return}status('连接断开 · 正在重连',false);setTimeout(connect,retry);retry=Math.min(retry*2,5000)};
+ ws.onerror=()=>ws.close();
+}
+connect();
+let seed=81;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
+const dots=Array.from({length:2000},()=>({a:rand()*Math.PI*2,r:.42+rand()*.9,z:rand(),size:.5+rand()*1.5}));
+const stars=Array.from({length:180},()=>({x:rand(),y:rand(),v:rand()}));
+function frame(now){
+ requestAnimationFrame(frame);const dt=Math.min((now-last)/1000,.05);last=now;fps=fps*.97+(1/Math.max(dt,.001))*.03;
+ if(!paused)phase+=dt*state.speed*.65;
+ mx+=(tx-mx)*.035;my+=(ty-my)*.035;
+ const r=Math.min(width*.33,height*.33)*state.spread,cx=width/2+mx*45,cy=height*.53+my*30,hue=state.hue;
+ ctx.globalCompositeOperation='source-over';ctx.fillStyle='#050811';ctx.fillRect(0,0,width,height);
+ for(const s of stars){ctx.fillStyle='rgba(137,184,220,'+(.12+s.v*.36)+')';ctx.fillRect(s.x*width,s.y*height,1,1)}
+ let bg=ctx.createRadialGradient(cx,cy,0,cx,cy,r*1.65);bg.addColorStop(0,'hsla('+hue+',90%,35%,.17)');bg.addColorStop(.5,'hsla('+(hue+40)+',90%,22%,.07)');bg.addColorStop(1,'transparent');ctx.fillStyle=bg;ctx.fillRect(0,0,width,height);
+ const tilt=.40+.12*Math.sin(phase*.45)+my*.15,rot=.2*Math.sin(phase*.35)+mx*.3;
+ function point(a,rad,z=0){const x=Math.cos(a)*rad,y=Math.sin(a)*rad*(tilt+z*.16);return[cx+x*Math.cos(rot)-y*Math.sin(rot),cy+x*Math.sin(rot)+y*Math.cos(rot)]}
+ ctx.globalCompositeOperation='lighter';
+ for(let ring=0;ring<state.rings;ring++){
+  ctx.beginPath();for(let j=0;j<=160;j++){const a=j/160*Math.PI*2,rr=r*(.68+ring*.073)+Math.sin(a*3+phase+ring*.5)*r*.025;const [x,y]=point(a,rr,Math.sin(phase*.3+ring*.5));j?ctx.lineTo(x,y):ctx.moveTo(x,y)}
+  ctx.strokeStyle='hsla('+(hue+ring*11)+',95%,65%,.55)';ctx.lineWidth=1.2;ctx.shadowBlur=12*state.glow;ctx.shadowColor=ctx.strokeStyle;ctx.stroke();
+ }
+ ctx.shadowBlur=0;
+ for(let i=0;i<state.particles;i++){
+  const p=dots[i],a=p.a+phase*(.35+p.z*.4)*(p.z>.5?1:-1),rr=r*p.r;
+  const [x,y]=point(a,rr,p.z);const [x0,y0]=point(a-.025,rr,p.z);
+  ctx.strokeStyle='hsla('+(hue+p.z*85)+',95%,70%,'+(.25+p.z*.55)+')';ctx.lineWidth=p.size;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x,y);ctx.stroke();
+ }
+ for(let arm=0;arm<3;arm++){
+  ctx.beginPath();for(let j=0;j<130;j++){const u=j/129,a=u*7+arm*Math.PI*2/3-phase,rr=r*(.06+u*.38),x=cx+Math.cos(a)*rr,y=cy+Math.sin(a)*rr;j?ctx.lineTo(x,y):ctx.moveTo(x,y)}
+  ctx.strokeStyle='hsla('+(hue+arm*35)+',100%,70%,.8)';ctx.shadowColor=ctx.strokeStyle;ctx.shadowBlur=18*state.glow;ctx.lineWidth=1.5;ctx.stroke();
+ }
+ const core=ctx.createRadialGradient(cx,cy,0,cx,cy,r*.17);core.addColorStop(0,'rgba(230,255,255,.95)');core.addColorStop(.1,'hsla('+hue+',100%,80%,.7)');core.addColorStop(.4,'hsla('+hue+',100%,55%,.13)');core.addColorStop(1,'transparent');ctx.shadowBlur=0;ctx.fillStyle=core;ctx.beginPath();ctx.arc(cx,cy,r*.17,0,Math.PI*2);ctx.fill();
+ ctx.globalCompositeOperation='source-over';
+ $('telemetry').textContent=Math.round(fps)+' FPS   /   '+(connected?'LIVE':'OFFLINE')+'   /   '+(paused?'PAUSED':'FLOWING');
+}
+requestAnimationFrame(frame);
+</script></html>

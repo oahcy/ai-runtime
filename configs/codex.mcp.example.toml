@@ -1,0 +1,5 @@
+[mcp_servers.ai-runtime]
+command = "D:/prj/ai-runtime/.venv/Scripts/python.exe"
+args = ["-m", "ai_runtime.mcp_server", "--runtime-url", "http://127.0.0.1:8765", "--token-file", "D:/prj/ai-runtime/.runtime/token"]
+startup_timeout_sec = 15
+tool_timeout_sec = 60
