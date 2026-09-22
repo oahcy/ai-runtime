@@ -118,3 +118,7 @@ display(Image(filename='screenshot.png'))
 ## 实时预览
 
 通过 `runtime.preview.start()` 打开持续动画窗口，再用 `runtime.preview.update(...)` 实时修改画面。详见 [Live Preview](docs/live-preview.md)。
+
+## 风洞实时预览示例
+
+[examples/live-lab](examples/live-lab/README.md) 与 Runtime 一起维护，展示 Python 后台模拟、WebSocket 状态推送和 Canvas 实时显示。创建会话时，将工作目录设为仓库下的 `examples/live-lab`，再运行 `from lab import WindTunnel`。

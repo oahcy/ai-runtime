@@ -2,7 +2,7 @@
 
 通过 ai-runtime 的持久 Python kernel 运行，不额外安装依赖。
 
-在 cwd 为本目录的 kernel 中执行：
+示例位于主仓库 `examples/live-lab`，无需独立仓库。创建 Runtime 会话时将 cwd 设为此目录（本机为 `D:/prj/ai-runtime/examples/live-lab`），然后在 kernel 中执行：
 
 ```python
 from lab import WindTunnel
@@ -29,4 +29,4 @@ Python 后台线程按固定 dt=1/30 计算速度松弛、旋涡场与圆障碍�
 
 这是交互式粒子场示例，不是工程流体力学或 CFD 求解器。kernel 关闭后预览停止；MCP 断开则继续运行。
 
-测试：使用 ai-runtime 虚拟环境运行 `python -m pytest test_lab.py -q`。
+测试：在主仓库根目录运行 `.\.venv\Scripts\python.exe -m pytest examples/live-lab/test_lab.py -q`。默认全量测试也会包含此示例。
