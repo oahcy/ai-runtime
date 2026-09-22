@@ -46,7 +46,9 @@ class Session:
 
 
 class Runtime:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, preview_hub=None, preview_url=None):
+        self.preview_hub = preview_hub
+        self.preview_url = preview_url
         self.store = Store(root)
         self.sessions = {}
         self._execution_starts = {}
@@ -86,6 +88,11 @@ class Runtime:
         client = None
         try:
             env = dict(os.environ, AI_RUNTIME_SESSION_DIR=str(folder))
+            for name in ('AI_RUNTIME_PREVIEW_URL', 'AI_RUNTIME_PREVIEW_KEY', 'AI_RUNTIME_SESSION_ID'):
+                env.pop(name, None)
+            if self.preview_hub and self.preview_url:
+                env.update(AI_RUNTIME_PREVIEW_URL=self.preview_url, AI_RUNTIME_SESSION_ID=sid,
+                           AI_RUNTIME_PREVIEW_KEY=self.preview_hub.attach(sid))
             await km.start_kernel(cwd=row['cwd'], env=env)
             client = km.client()
             client.start_channels()
@@ -102,6 +109,8 @@ class Runtime:
             self.store.event(sid, None, 'session.ready', {'generation': row['generation']})
             log_event('session.ready', session=sid[:8], generation=row['generation'], cwd=row['cwd'])
         except BaseException:
+            if self.preview_hub:
+                self.preview_hub.detach(sid)
             if client:
                 client.stop_channels()
             with contextlib.suppress(Exception):
@@ -288,6 +297,8 @@ class Runtime:
                 self._lost(live, 'interrupt not confirmed; kernel must be restarted')
 
     def _lost(self, live, reason):
+        if self.preview_hub:
+            self.preview_hub.detach(live.id)
         if live.closing or self.session(live.id)['status'] == 'lost':
             return
         self.store.execute("UPDATE sessions SET status='lost' WHERE id=?", (live.id,))
@@ -306,6 +317,8 @@ class Runtime:
                 return
 
     async def close_session(self, sid):
+        if self.preview_hub:
+            self.preview_hub.detach(sid)
         self.session(sid)
         live = self.sessions.pop(sid, None)
         if live:

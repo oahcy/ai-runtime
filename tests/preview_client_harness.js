@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const sockets = [], timers = new Map(), listeners = {};
 let tid = 0;
-global.location = {hash:'#credential', host:'127.0.0.1:1234', protocol:'http:'};
+global.location = {hash:'#credential', host:'127.0.0.1:1234', protocol:'http:', pathname:'/previews/example/'};
 global.addEventListener = (name, fn) => listeners[name] = fn;
 global.setTimeout = fn => { timers.set(++tid, fn); return tid; };
 global.clearTimeout = id => timers.delete(id);
@@ -20,6 +20,7 @@ const unsubBad=RuntimePreview.subscribe(()=>{throw Error('renderer failed')});
 const unsub=RuntimePreview.subscribe((state, meta)=>values.push([state,meta]));
 assert.equal(sockets.length,1);
 const first=sockets[0];
+assert.equal(first.url,'ws://127.0.0.1:1234/previews/example/ws');
 first.onopen();
 assert.deepEqual(first.sent,{token:'credential'});
 first.onmessage({data:'invalid'});

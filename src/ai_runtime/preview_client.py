@@ -17,7 +17,7 @@ CLIENT_JS = r"""
     const token = location.hash.slice(1);
     if (!token) { blocked = true; setStatus('unauthorized'); return; }
     setStatus('connecting');
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + (location.pathname || '/').replace(/\/?$/, '/') + 'ws');
     socket = ws;
     let revision = -1;
     ws.onopen = () => { if (socket === ws) ws.send(JSON.stringify({token})); };

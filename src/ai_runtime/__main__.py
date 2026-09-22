@@ -23,7 +23,7 @@ def main():
     LOGGER.info("Trusted local mode; token file: %s", token_file)
     LOGGER.info("API documentation: http://127.0.0.1:%s/docs", args.port)
     from .api import create_app
-    uvicorn.run(create_app(root, token), host='127.0.0.1', port=args.port, log_config=None)
+    uvicorn.run(create_app(root, token, preview_url=f'http://127.0.0.1:{args.port}'), host='127.0.0.1', port=args.port, log_config=None)
 
 
 if __name__ == '__main__':

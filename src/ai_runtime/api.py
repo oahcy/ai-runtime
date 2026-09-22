@@ -5,12 +5,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .engine import Runtime
+from .preview_hub import PreviewHub
 from .plugins import Catalog
 from .observability import configure_logging, log_event
 
@@ -39,14 +40,15 @@ class Execute(BaseModel):
     timeout: float = Field(default=30, ge=0.1, le=3600)
 
 
-def create_app(root: Path, token: str):
+def create_app(root: Path, token: str, *, preview_url: str | None = None):
+    hub = PreviewHub()
     if not token:
         raise ValueError('an authentication token is required')
 
     @asynccontextmanager
     async def lifespan(app):
         configure_logging()
-        runtime = Runtime(root)
+        runtime = Runtime(root, preview_hub=hub, preview_url=preview_url)
         app.state.runtime = runtime
         try:
             registered = Catalog(root).list()
@@ -57,6 +59,8 @@ def create_app(root: Path, token: str):
             log_event('runtime.stopped')
 
     app = FastAPI(title='Local AI Runtime', version='0.1.0', lifespan=lifespan)
+    hub.mount(app)
+    app.state.preview_hub = hub
     bearer = HTTPBearer(auto_error=False)
 
     def authorize(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]):
@@ -85,8 +89,18 @@ def create_app(root: Path, token: str):
     async def health():
         return {'status': 'ok', 'mode': 'trusted-local', 'version': '0.1.0'}
 
+    def configure_preview_origin(request: Request):
+        if not app.state.runtime.preview_url:
+            host = request.url.hostname
+            port = request.url.port or 80
+            if host not in ('127.0.0.1', 'localhost', '::1'):
+                host, port = '127.0.0.1', 8765
+            address = '[' + host + ']' if ':' in host else host
+            app.state.runtime.preview_url = f'http://{address}:{port}'
+
     @app.post('/sessions', dependencies=secured, status_code=201)
-    async def create(body: CreateSession):
+    async def create(body: CreateSession, request: Request):
+        configure_preview_origin(request)
         return await app.state.runtime.create(body.cwd)
 
     @app.get('/sessions', dependencies=secured)
@@ -104,7 +118,8 @@ def create_app(root: Path, token: str):
         return app.state.runtime.session(sid)
 
     @app.post('/sessions/{sid}/restart', dependencies=secured)
-    async def restart(sid: str):
+    async def restart(sid: str, request: Request):
+        configure_preview_origin(request)
         return await app.state.runtime.restart(sid)
 
     @app.post('/sessions/{sid}/executions', dependencies=secured, status_code=202)

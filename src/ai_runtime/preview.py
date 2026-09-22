@@ -1,7 +1,8 @@
-"""Live Preview: a kernel-owned, read-only browser view of Python scene state."""
+"""Live Preview: a runtime-managed, read-only browser view of Python scene state."""
 import asyncio
 import copy
 import json
+import os
 import secrets
 import re
 from .preview_client import CLIENT_JS
@@ -20,6 +21,19 @@ document.getElementById('state').textContent=JSON.stringify({state, ...meta}, nu
 </script>"""
 
 
+PAGE_HEADERS = {
+    'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+}
+
+
+def render_html(html):
+    first = re.search(r'<script\b', html, re.IGNORECASE)
+    index = first.start() if first else len(html)
+    return html[:index] + '<script>' + CLIENT_JS + '</script>' + html[index:]
+
+
 class Preview:
     def __init__(self, *, html=None, state=None):
         self._lock = threading.Lock()
@@ -34,6 +48,7 @@ class Preview:
         self._server = self._thread = self._socket = None
         self._token = secrets.token_urlsafe(32)
         self._port = None
+        self._hosted = None
 
     def snapshot(self):
         with self._lock:
@@ -72,16 +87,7 @@ class Preview:
 
         @app.get('/')
         async def page():
-            # Install the public client API before any plugin script executes.
-            bootstrap = '<script>' + CLIENT_JS + '</script>'
-            first_script = re.search(r'<script\b', self._html, re.IGNORECASE)
-            index = first_script.start() if first_script else len(self._html)
-            html = self._html[:index] + bootstrap + self._html[index:]
-            return HTMLResponse(html, headers={
-                'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
-                'X-Content-Type-Options': 'nosniff',
-                'Content-Security-Policy': "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
-            })
+            return HTMLResponse(render_html(self._html), headers=PAGE_HEADERS)
 
         @app.websocket('/ws')
         async def stream(ws: WebSocket):
@@ -118,6 +124,16 @@ class Preview:
         return app
 
     def start(self, port=0):
+        if os.environ.get('AI_RUNTIME_PREVIEW_URL'):
+            if port:
+                raise ValueError('Managed previews use the runtime service port')
+            if self._hosted:
+                return self._hosted.info()
+            from .preview_publisher import HostedPreview
+            hosted = HostedPreview(self)
+            hosted.start()
+            self._hosted = hosted
+            return hosted.info()
         if self._thread and self._thread.is_alive():
             return self.info()
         import uvicorn
@@ -143,12 +159,18 @@ class Preview:
         return self.info()
 
     def info(self):
+        if self._hosted:
+            return self._hosted.info()
         running = bool(self._thread and self._thread.is_alive() and self._server.started)
         return dict(running=running,
                     url=f'http://127.0.0.1:{self._port}/#{self._token}' if running else None,
                     revision=self.snapshot()['revision'])
 
     def stop(self):
+        if self._hosted:
+            self._hosted.stop()
+            self._hosted = None
+            return
         if self._server:
             self._server.should_exit = True
         if self._thread:
