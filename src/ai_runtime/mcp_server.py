@@ -5,7 +5,7 @@ import base64
 import json
 import re
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -89,6 +89,7 @@ def create_server(bridge: Bridge):
         'Reuse session_id to preserve memory; client/MCP disconnect does not close the session. '
         'Use a stable unique request_id per logical execute request; uncertain retries must reuse identical arguments. '
         'Prefer execute_and_wait or call_plugin_and_wait for short operations: they return execution-scoped outputs, or a running job ID. Use read_execution_result to continue without resubmitting. execute remains queue-only. Read images with read_artifact. '
+        'Use evaluate_js to execute JavaScript directly in an already connected chrome-devtools or usb-browser target, without Python wrappers. '
         'Never automatically replay unknown executions or restart kernels: inspect external effects first. '
         'Restart discards all Python memory; checkpoints only store explicit JSON. '
         'Use list_plugins/get_plugin to discover local plugins; add_plugin registers a trusted local directory. Plugin load/call/unload run as queued kernel jobs. Use normal Python libraries and the preloaded runtime SDK.'
@@ -154,6 +155,50 @@ def create_server(bridge: Bridge):
         """Call a plugin once and return job status and outputs. Plugin result is JSON stdout. Waiting does not cancel or replay the action."""
         job = await call_plugin(session_id, plugin_id, request_id, action, arguments, timeout)
         return await finish_short_job(job, wait_seconds)
+
+    @server.tool(annotations=WRITE)
+    async def evaluate_js(session_id: Identifier,
+                          request_id: Annotated[str, Field(min_length=1, max_length=128)],
+                          code: Annotated[str, Field(min_length=1, max_length=262144)],
+                          plugin_id: Literal['chrome-devtools', 'usb-browser'] = 'chrome-devtools',
+                          context_id: int | None = None,
+                          await_promise: bool = True,
+                          return_by_value: bool = True,
+                          timeout: Annotated[float, Field(ge=.1, le=120)] = 10,
+                          wait_seconds: Annotated[float, Field(ge=0, le=20)] = 5) -> dict:
+        """Execute JS in the plugin's connected target, not in Python or a local Node kernel.
+
+        Connect the plugin in this Runtime session first. context_id selects a CDP execution
+        context (e.g. iframe); omit for default context. This does not transpile TypeScript.
+        Code may mutate the application. timeout is CDP wait time, not cancellation of JS.
+        Never replay an uncertain outcome. Identical retries must reuse request_id and arguments.
+        Returns job outputs plus javascript when available; exceptionDetails means JS failed even
+        if the kernel job succeeded. If done=false, continue read_execution_result with execution_id.
+        Use return_by_value=false for objectId references; inspect via plugin variables action.
+        """
+        arguments = dict(expression=code, await_promise=await_promise,
+                         return_by_value=return_by_value, timeout=timeout)
+        if context_id is not None:
+            arguments['context_id'] = context_id
+        action = 'evaluate'
+        if plugin_id == 'usb-browser':
+            arguments = dict(action=action, arguments=arguments)
+            action = 'cdp'
+        result = await call_plugin_and_wait(session_id, plugin_id, request_id, action,
+                                            arguments, timeout + 5, wait_seconds)
+        # Preserve the durable job envelope and raw outputs for follow-up reads.
+        stdout = ''.join(e.get('payload', {}).get('text', '') for e in result.get('outputs', [])
+                         if e.get('kind') == 'output.stream' and e.get('payload', {}).get('name') == 'stdout')
+        if result.get('done') and not result.get('has_more') and result.get('status') == 'succeeded':
+            try:
+                value = json.loads(stdout)
+            except (ValueError, TypeError):
+                pass
+            else:
+                if isinstance(value, dict) and ('result' in value or 'exceptionDetails' in value):
+                    result['javascript'] = value
+                    result['javascript_status'] = 'exception' if 'exceptionDetails' in value else 'succeeded'
+        return result
 
     @server.tool(annotations=READ)
     async def get_execution(execution_id: Identifier) -> dict:

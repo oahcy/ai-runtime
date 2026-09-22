@@ -139,3 +139,26 @@ Runtime 管理注册清单、会话内加载和生命周期；具体效果与外
 每项日志字段最多280字符，代码多行合并为一行；不打印执行输出或逐帧状态。常见密码/token/API key 字段和预览链接片段会隐藏，代码中包含凭证关键词的整行会省略；这不是对任意代码的完整秘密检测，业务指令仍可能出现在本机终端。MCP 标准输出不受影响。已有服务需重启，新 kernel 才能使用更新后的事件回传。
 
 - [USB 手机浏览器调试](plugins/usb-browser/README.md)：设备发现、浏览器页面选择、独立端口转发和 CDP 调试
+
+
+### 直接执行目标 JavaScript
+
+MCP 工具 `evaluate_js` 复用指定会话中已连接的调试插件，不需要调用者包装 Python：
+
+```json
+{
+  "session_id": "已有 Runtime 会话 ID",
+  "request_id": "read-scene-1",
+  "plugin_id": "chrome-devtools",
+  "code": "cc.director.getScene().name"
+}
+```
+
+手机浏览器使用 `plugin_id: "usb-browser"`，例如 `code: "document.title"`。
+先通过插件连接目标；此工具不会自动连接、切换页面或重放代码。
+可选 `context_id` 选择 iframe 执行上下文；`return_by_value: false` 返回对象引用。
+执行的是目标引擎中的 JS，不支持直接输入 TS 类型语法。断点局部变量仍使用插件的 `frame_evaluate`。
+完成时除原有任务结果外，返回 `javascript` 和 `javascript_status`；JS 异常标记为 `exception`。
+若任务未完成，用 `read_execution_result` 继续读取原任务，检查输出中的 `exceptionDetails`，不要重复执行。
+CDP 超时不代表远端 JS 已停止，不能据此自动重试。
+新增 MCP 工具需要重新连接 MCP 适配器以刷新工具列表；无需重启游戏或更换内核。

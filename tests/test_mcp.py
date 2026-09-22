@@ -47,7 +47,7 @@ async def test_bridge_auth_error_and_image(tmp_path):
     assert result.content[0].data == PNG
     server = create_server(bridge)
     tools = await server.list_tools()
-    assert len(tools) == 21
+    assert len(tools) == 22
     by_name = {tool.name: tool for tool in tools}
     assert by_name['execute'].annotations.readOnlyHint is False
     assert by_name['read_artifact'].annotations.readOnlyHint is True
@@ -99,7 +99,7 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
         async with stdio_client(parameters) as (reader, writer):
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
-                assert len((await client.list_tools()).tools) == 21
+                assert len((await client.list_tools()).tools) == 22
                 plugin_dir = scaffold(tmp_path / 'mcp-plugin', 'mcp-test')
                 unpack(await client.call_tool('add_plugin', {'path': plugin_dir}))
                 assert unpack(await client.call_tool('get_plugin', {'plugin_id': 'mcp-test'}))['id'] == 'mcp-test'
@@ -170,3 +170,57 @@ async def test_fast_result_failure_preserves_accepted_job_id(tmp_path):
     with pytest.raises(ToolError, match=eid):
         await server.call_tool('execute_and_wait', {'session_id':'b'*32,'request_id':'one','code':'print(1)'})
     assert requests == ['POST', 'GET']
+
+
+@pytest.mark.parametrize('plugin', ['chrome-devtools', 'usb-browser'])
+@pytest.mark.parametrize('throws', [False, True])
+async def test_evaluate_js_routing_and_exception(tmp_path, plugin, throws):
+    token = tmp_path / 'token'
+    token.write_text('secret')
+    requests = []
+    js = {'result': {'type': 'number', 'value': 42}}
+    if throws:
+        js['exceptionDetails'] = {'text': 'Uncaught'}
+    code = "const quote = `a\\b`;\n({value: 42})"
+    def handler(request):
+        requests.append(request)
+        if request.method == 'POST':
+            assert request.url.path == '/sessions/' + 'b'*32 + '/plugins/' + plugin + '/call'
+            body = json.loads(request.content)
+            args = body['arguments']
+            if plugin == 'usb-browser':
+                assert body['action'] == 'cdp' and args['action'] == 'evaluate'
+                args = args['arguments']
+            else:
+                assert body['action'] == 'evaluate'
+            assert args == dict(expression=code, context_id=7, await_promise=True,
+                                return_by_value=False, timeout=2)
+            assert body['timeout'] == 7 and body['request_id'] == 'js-one'
+            return httpx.Response(202, json={'id': 'a'*32})
+        text = json.dumps(js)
+        return httpx.Response(200, json={'execution_id':'a'*32, 'done':True,
+            'status':'succeeded', 'has_more':False, 'outputs':[
+                {'kind':'output.stream','payload':{'name':'stdout','text':text[:10]}},
+                {'kind':'output.stream','payload':{'name':'stdout','text':text[10:]}}]})
+    server = create_server(Bridge('http://127.0.0.1:8765', token, httpx.MockTransport(handler)))
+    response = await server.call_tool('evaluate_js', dict(session_id='b'*32,request_id='js-one',
+        code=code,plugin_id=plugin,context_id=7,return_by_value=False,timeout=2))
+    result = json.loads(response[0].text)
+    assert result['javascript'] == js
+    assert result['javascript_status'] == ('exception' if throws else 'succeeded')
+    assert len(requests) == 2
+
+
+async def test_evaluate_js_running_job_is_not_replayed(tmp_path):
+    token = tmp_path / 'token'
+    token.write_text('secret')
+    methods=[]
+    def handler(request):
+        methods.append(request.method)
+        return httpx.Response(200, json={'id':'a'*32} if request.method=='POST' else
+            {'execution_id':'a'*32, 'done':False,'status':'running','outputs':[]})
+    server=create_server(Bridge('http://localhost:8765',token,httpx.MockTransport(handler)))
+    response=await server.call_tool('evaluate_js',dict(session_id='b'*32,request_id='one',code='pending()'))
+    result=json.loads(response[0].text)
+    assert not result['done'] and 'javascript_status' not in result
+    assert methods==['POST','GET']
