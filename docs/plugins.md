@@ -10,6 +10,8 @@ MCP 工具保持通用，不为每个插件单独增加工具。
 ai-runtime/
   src/ai_runtime/       通用 Runtime
   plugins/effects/     效果测试插件：霓虹 + 风洞
+  plugins/chrome-devtools/  CDP 调试插件
+  plugins/adb/         Android 设备工具
   examples/            使用插件的简短脚本
   tests/               Runtime 与插件测试
 ```
@@ -102,7 +104,7 @@ def create(context):
     return MyPlugin(context)
 ```
 
-context 包含 api_version、session_id、session_dir、workdir。
+context 包含 api_version、session_id、session_dir、workdir、logger。
 create 只在首次加载时调用，失败时插件应清理其已创建资源。
 call 接收及返回 JSON 可序列化数据，拒绝 NaN/Infinity；文件和图片可用 runtime.save_artifact 保存后返回引用。
 Runtime 校验清单声明的动作，业务参数由插件校验。先完成校验，再修改状态。
@@ -138,3 +140,10 @@ context.logger.error("读取失败", error_type="TimeoutError")
 普通 print 和第三方 logging 不会自动改走此接口。后台线程可调用 logger，但任务归属取决于 IOPub 的 parent ID：后台消息可能没有 execution_id，或仍关联启动线程的任务；session_id 和插件名始终明确。
 
 密码/token 等命名字段会脱敏，URL fragment 会隐藏；不要把凭证直接拼入 msg。此改动只统一业务日志接口和结构化传输，终端重定向仍为文本，未加入 JSONL 输出模式。
+
+## 内置工具插件
+
+- [Chrome DevTools](../plugins/chrome-devtools/README.md)：持久调试连接、求值、协议事件和截图。
+- [ADB](../plugins/adb/README.md)：设备选择、shell、logcat、截图和端口转发。
+
+各插件目录需分别 add 注册。新增注册不需要重启服务；list_plugins 可立即发现，call_plugin 首次调用自动加载。

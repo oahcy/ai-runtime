@@ -1,0 +1,66 @@
+{
+  "id": "chrome-devtools",
+  "name": "Chrome DevTools 调试",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "持久 CDP 连接、表达式执行、事件游标和截图；支持本机 Chrome 或兼容 V8 调试端口。",
+  "entry": "plugin.py",
+  "actions": {
+    "targets": {
+      "description": "Discover debugger targets without connecting",
+      "parameters": {
+        "endpoint": "loopback http origin; default http://127.0.0.1:9222",
+        "timeout": "0.1..120 seconds, default 10"
+      }
+    },
+    "connect": {
+      "description": "Connect a persistent debugger WebSocket",
+      "parameters": {
+        "url": "loopback ws/wss URL or devtools://...inspector.html?ws=...",
+        "timeout": "0.1..120 seconds"
+      }
+    },
+    "command": {
+      "description": "Send a CDP command; no automatic retry",
+      "parameters": {
+        "method": "Domain.command",
+        "params": "optional object",
+        "session_id": "optional flattened CDP session ID",
+        "timeout": "default 10 seconds"
+      }
+    },
+    "evaluate": {
+      "description": "Execute JavaScript in the connected runtime; inspect exceptionDetails",
+      "parameters": {
+        "expression": "JavaScript source",
+        "await_promise": "boolean default true",
+        "return_by_value": "boolean default true",
+        "context_id": "optional execution context integer",
+        "session_id": "optional CDP session ID",
+        "timeout": "default 10 seconds"
+      }
+    },
+    "events": {
+      "description": "Read buffered events by cursor",
+      "parameters": {
+        "after": "integer >=0 default0",
+        "limit": "1..100 default50"
+      }
+    },
+    "screenshot": {
+      "description": "Capture a page PNG as Runtime artifact; Page domain required",
+      "parameters": {
+        "timeout": "default10",
+        "session_id": "optional CDP session ID"
+      }
+    },
+    "status": {
+      "description": "Read current connection status",
+      "parameters": {}
+    },
+    "disconnect": {
+      "description": "Close this debugger connection",
+      "parameters": {}
+    }
+  }
+}

@@ -99,7 +99,7 @@ MCP 集成测试会启动独立 HTTP 服务和真实 STDIO Adapter，通过官�
 ## 当前边界
 
 - Adapter 仅接受 loopback HTTP origin，禁用环境代理、HTTP 重定向和自动写请求重试。
-- 本地插件接口已实现：新增 list_plugins、get_plugin、add_plugin、load_plugin、call_plugin、unload_plugin 六个工具；详见 [插件说明](plugins.md)。DevTools/ADB 具体插件尚未实现。
+- 本地插件接口已实现：新增 list_plugins、get_plugin、add_plugin、load_plugin、call_plugin、unload_plugin 六个工具；详见 [插件说明](plugins.md)。已提供 [DevTools](../plugins/chrome-devtools/README.md) 与 [ADB](../plugins/adb/README.md) 插件，通过相同的 call_plugin 调用。
 - token 代表本机可信执行权限；首版依旧不是沙箱。
 - WebSocket 仍是 Runtime API 能力；MCP 层目前按游标读取事件，没有向闲置模型主动推送唤醒事件。
 

@@ -1,0 +1,73 @@
+{
+  "id": "adb",
+  "name": "ADB 工具",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "设备选择、Shell、应用启动、日志、转发和 PNG 截图。需要本机 Android platform-tools。",
+  "entry": "plugin.py",
+  "actions": {
+    "configure": {
+      "description": "Set executable or default serial",
+      "parameters": {
+        "adb_path": "optional absolute executable path",
+        "serial": "optional serial or null to clear"
+      }
+    },
+    "status": {
+      "description": "Read executable path and default serial",
+      "parameters": {}
+    },
+    "devices": {
+      "description": "List devices including offline and unauthorized",
+      "parameters": {}
+    },
+    "shell": {
+      "description": "Run an Android shell command; host shell is never used",
+      "parameters": {
+        "command": "device shell command string",
+        "serial": "optional device serial",
+        "timeout": "0.1..120 seconds, default15"
+      }
+    },
+    "screenshot": {
+      "description": "Capture device PNG to Runtime artifact",
+      "parameters": {
+        "serial": "optional device serial",
+        "timeout": "default15 seconds"
+      }
+    },
+    "logcat": {
+      "description": "Read a bounded logcat snapshot",
+      "parameters": {
+        "lines": "integer1..2000 default200",
+        "serial": "optional device serial",
+        "timeout": "default15 seconds"
+      }
+    },
+    "start_app": {
+      "description": "Start an explicit Android activity",
+      "parameters": {
+        "component": "package/activity",
+        "serial": "optional device serial",
+        "timeout": "default15 seconds"
+      }
+    },
+    "forward": {
+      "description": "Create an adb port forward",
+      "parameters": {
+        "local": "tcp:port (0 for auto)",
+        "remote": "tcp:port or localabstract:name",
+        "serial": "optional device serial",
+        "timeout": "default15 seconds"
+      }
+    },
+    "run": {
+      "description": "Run explicit ADB command arguments on the selected device",
+      "parameters": {
+        "args": "nonempty string array, no leading global flags",
+        "serial": "optional device serial",
+        "timeout": "default15 seconds"
+      }
+    }
+  }
+}
