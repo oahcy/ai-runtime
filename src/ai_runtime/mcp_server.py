@@ -172,7 +172,9 @@ def create_server(bridge: Bridge):
         context (e.g. iframe); omit for default context. This does not transpile TypeScript.
         Code may mutate the application. timeout is CDP wait time, not cancellation of JS.
         Never replay an uncertain outcome. Identical retries must reuse request_id and arguments.
-        Returns job outputs plus javascript when available; exceptionDetails means JS failed even
+        Returns job metadata and javascript when parsed, omitting duplicate stdout. Other outputs
+        and unparsed results are retained; full history remains in read_execution_result.
+        exceptionDetails means JS failed even
         if the kernel job succeeded. If done=false, continue read_execution_result with execution_id.
         Use return_by_value=false for objectId references; inspect via plugin variables action.
         """
@@ -186,7 +188,7 @@ def create_server(bridge: Bridge):
             action = 'cdp'
         result = await call_plugin_and_wait(session_id, plugin_id, request_id, action,
                                             arguments, timeout + 5, wait_seconds)
-        # Preserve the durable job envelope and raw outputs for follow-up reads.
+        # Compact only this response; durable execution outputs remain unchanged.
         stdout = ''.join(e.get('payload', {}).get('text', '') for e in result.get('outputs', [])
                          if e.get('kind') == 'output.stream' and e.get('payload', {}).get('name') == 'stdout')
         if result.get('done') and not result.get('has_more') and result.get('status') == 'succeeded':
@@ -198,6 +200,12 @@ def create_server(bridge: Bridge):
                 if isinstance(value, dict) and ('result' in value or 'exceptionDetails' in value):
                     result['javascript'] = value
                     result['javascript_status'] = 'exception' if 'exceptionDetails' in value else 'succeeded'
+                    remaining = [e for e in result.get('outputs', [])
+                                 if not (e.get('kind') == 'output.stream'
+                                         and e.get('payload', {}).get('name') == 'stdout')]
+                    result = {k: v for k, v in result.items() if k != 'outputs'}
+                    if remaining:
+                        result['outputs'] = remaining
         return result
 
     @server.tool(annotations=READ)

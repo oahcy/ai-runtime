@@ -206,6 +206,8 @@ async def test_evaluate_js_routing_and_exception(tmp_path, plugin, throws):
     response = await server.call_tool('evaluate_js', dict(session_id='b'*32,request_id='js-one',
         code=code,plugin_id=plugin,context_id=7,return_by_value=False,timeout=2))
     result = json.loads(response[0].text)
+    assert 'outputs' not in result
+    assert result['execution_id'] == 'a'*32
     assert result['javascript'] == js
     assert result['javascript_status'] == ('exception' if throws else 'succeeded')
     assert len(requests) == 2
@@ -224,3 +226,28 @@ async def test_evaluate_js_running_job_is_not_replayed(tmp_path):
     result=json.loads(response[0].text)
     assert not result['done'] and 'javascript_status' not in result
     assert methods==['POST','GET']
+
+
+@pytest.mark.parametrize('stdout,status,has_more', [
+    ('not JSON', 'succeeded', False),
+    ('{"result":{}}', 'failed', False),
+    ('{"result":{}}', 'succeeded', True),
+    ('{"result":{}}', 'succeeded', False),
+])
+async def test_evaluate_js_compaction_preserves_diagnostics_and_history(tmp_path, stdout, status, has_more):
+    token=tmp_path/'token'
+    token.write_text('secret')
+    stderr={'kind':'output.stream','payload':{'name':'stderr','text':'diagnostic'}}
+    outputs=[{'kind':'output.stream','payload':{'name':'stdout','text':stdout}}, stderr]
+    envelope=dict(execution_id='a'*32,done=True,status=status,has_more=has_more,cursor=9,outputs=outputs)
+    def handler(request):
+        return httpx.Response(200,json={'id':'a'*32} if request.method=='POST' else envelope)
+    server=create_server(Bridge('http://localhost:8765',token,httpx.MockTransport(handler)))
+    response=await server.call_tool('evaluate_js',dict(session_id='b'*32,request_id='one',code='1'))
+    result=json.loads(response[0].text)
+    compact=status=='succeeded' and not has_more and stdout.startswith('{')
+    assert result['outputs']==([stderr] if compact else outputs)
+    assert ('javascript' in result)==compact
+    assert result['cursor']==9
+    history=json.loads((await server.call_tool('read_execution_result',dict(execution_id='a'*32)))[0].text)
+    assert history['outputs']==outputs

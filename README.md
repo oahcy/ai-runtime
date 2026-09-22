@@ -158,7 +158,8 @@ MCP 工具 `evaluate_js` 复用指定会话中已连接的调试插件，不需�
 先通过插件连接目标；此工具不会自动连接、切换页面或重放代码。
 可选 `context_id` 选择 iframe 执行上下文；`return_by_value: false` 返回对象引用。
 执行的是目标引擎中的 JS，不支持直接输入 TS 类型语法。断点局部变量仍使用插件的 `frame_evaluate`。
-完成时除原有任务结果外，返回 `javascript` 和 `javascript_status`；JS 异常标记为 `exception`。
+完成且解析成功时返回任务信息、`javascript` 和 `javascript_status`，省略重复的 stdout；JS 异常标记为 `exception`。
+其他诊断输出、未完成或无法解析的结果保留原始输出。完整记录始终可通过 `read_execution_result` 获取。
 若任务未完成，用 `read_execution_result` 继续读取原任务，检查输出中的 `exceptionDetails`，不要重复执行。
 CDP 超时不代表远端 JS 已停止，不能据此自动重试。
 新增 MCP 工具需要重新连接 MCP 适配器以刷新工具列表；无需重启游戏或更换内核。
