@@ -25,6 +25,9 @@ async def test_hosted_preview_real_kernel(tmp_path):
             while not server.started:
                 await asyncio.sleep(.02)
         async with httpx.AsyncClient(base_url=base, headers={'Authorization': 'Bearer api-secret'}, timeout=40) as client:
+            assert (await client.get('/previews', headers={'Authorization': ''})).status_code == 401
+            assert (await client.get('/previews', headers={'Authorization': 'Bearer wrong'})).status_code == 401
+            assert (await client.get('/previews')).json() == {'previews': []}
             sid = (await client.post('/sessions', json={'cwd': str(tmp_path)})).json()['id']
 
             async def execute(code):
@@ -38,13 +41,24 @@ async def test_hosted_preview_real_kernel(tmp_path):
                             return
                         await asyncio.sleep(.05)
 
-            await execute("from ai_runtime.preview import Preview\np = Preview(state={'x': 1})\nq = Preview(state={'x': 2})\np.start()\nq.start()\nassert p._socket is None and q._socket is None\nassert p.info()['mode'] == 'hosted'")
+            await execute("from ai_runtime.preview import Preview\np = Preview(state={'x': 1}, name='named-preview')\nq = Preview(state={'x': 2})\np.start()\nq.start()\nassert p._socket is None and q._socket is None\nassert p.info()['mode'] == 'hosted'")
             hub = app.state.preview_hub
             await execute(f"assert p.info()['url'].startswith({base!r} + '/previews/')")
             assert len(hub.views) == 2
             pid = next(pid for pid, row in hub.views.items() if row['snapshot']['state']['x'] == 1)
             path = f'/previews/{pid}/'
             token = hub.views[pid]['token']
+            listing = await client.get('/previews', params={'session_id': sid})
+            assert listing.headers['cache-control'] == 'no-store'
+            items = listing.json()['previews']
+            assert len(items) == 2
+            item = next(item for item in items if item['id'] == pid)
+            assert item['name'] == 'named-preview' and item['session_id'] == sid
+            assert item['url'] == base + path + '#' + token
+            assert item['running'] is True
+            assert item['created_at'] == item['updated_at']
+            assert 'api-secret' not in listing.text and hub.sessions[sid] not in listing.text
+            assert (await client.get('/previews', params={'session_id': 'missing'})).json() == {'previews': []}
             # Viewer page contains no API, producer, or viewer credentials.
             page = await client.get(path, headers={'Authorization': ''})
             assert page.status_code == 200
@@ -70,12 +84,17 @@ async def test_hosted_preview_real_kernel(tmp_path):
             async with connect(wsurl, origin=base) as ws:
                 await ws.send(json.dumps({'token': token}))
                 assert json.loads(await ws.recv())['state'] == {'x': 7}
+            updated = next(item for item in (await client.get('/previews')).json()['previews'] if item['id'] == pid)
+            assert updated['revision'] == 1 and updated['updated_at'] > item['updated_at']
+            assert updated['created_at'] == item['created_at']
             await execute('p.stop()')
+            assert pid not in [item['id'] for item in (await client.get('/previews')).json()['previews']]
             assert (await client.get(path)).status_code == 404
             assert len(hub.views) == 1
             oldkey = hub.sessions[sid]
             assert (await client.post(f'/sessions/{sid}/restart')).status_code == 200
             assert not hub.views and hub.sessions[sid] != oldkey
+            assert (await client.get('/previews')).json() == {'previews': []}
             with pytest.raises(InvalidStatus):
                 async with connect(base.replace('http:', 'ws:') + f'/_internal/previews/{sid}/' + 'a'*32,
                                    additional_headers={'Authorization': 'Bearer ' + oldkey}):
@@ -87,6 +106,8 @@ async def test_hosted_preview_real_kernel(tmp_path):
             assert response.status_code in (200, 201), response.text
             await execute("fx = runtime.plugins.load('effects')\nfx.call('start', {'scene': 'wind', 'count': 100})")
             assert len(hub.views) == 2
+            names = [item['name'] for item in (await client.get('/previews')).json()['previews']]
+            assert any(name != 'preview' for name in names)
             await execute("runtime.plugins.unload('effects')\nassert runtime.plugins.cleanup_report('effects')['ok']")
             assert len(hub.views) == 1
             await app.state.runtime.sessions[sid].manager.shutdown_kernel(now=True)

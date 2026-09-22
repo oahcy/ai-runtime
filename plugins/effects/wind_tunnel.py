@@ -13,7 +13,7 @@ class WindTunnel:
         self.context = context
         self._worker_resource = None
         factory = context.preview.create if context else Preview
-        self._view = factory(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
+        self._view = factory(name='effects / wind', html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
         if not isinstance(count, int) or not 10 <= count <= 1500:
             raise ValueError('count must be an integer between 10 and 1500')
         rng = random.Random(seed)

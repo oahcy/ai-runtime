@@ -31,7 +31,7 @@ class HostedPreview:
         if 'ping_interval' in parameters: options['ping_interval'] = None
         ws = connect(self.base.replace('http:', 'ws:') + f'/_internal/previews/{self.sid}/{self.id}', **options)
         try:
-            ws.send(json.dumps({'html': self.preview._html, 'token': self.preview._token,
+            ws.send(json.dumps({'html': self.preview._html, 'token': self.preview._token, 'name': self.preview.name,
                                 'snapshot': self.preview.snapshot()}, allow_nan=False))
             if json.loads(ws.recv(timeout=5)).get('ok') is not True:
                 raise RuntimeError('Preview registration rejected')

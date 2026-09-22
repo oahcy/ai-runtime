@@ -3,6 +3,7 @@ import asyncio
 import json
 import re
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -37,6 +38,16 @@ class PreviewHub:
             if row['sid'] == sid:
                 self.views.pop(pid, None)
 
+    def list(self, base_url, session_id=None):
+        return [
+            dict(id=pid, session_id=row['sid'], name=row['name'], running=True,
+                 url=f"{base_url.rstrip('/')}/previews/{pid}/#{row['token']}",
+                 revision=row['snapshot']['revision'],
+                 created_at=row['created_at'], updated_at=row['updated_at'])
+            for pid, row in self.views.items()
+            if session_id is None or row['sid'] == session_id
+        ]
+
     def mount(self, app):
         @app.websocket('/_internal/previews/{sid}/{pid}')
         async def producer(ws: WebSocket, sid: str, pid: str):
@@ -53,6 +64,9 @@ class PreviewHub:
                     raise ValueError('Registration too large')
                 registration = json.loads(raw)
                 html, token = registration.get('html'), registration.get('token')
+                name = registration.get('name', 'preview')
+                if not isinstance(name, str) or not name.strip() or len(name) > 128:
+                    raise ValueError('Invalid preview name')
                 if (not isinstance(html, str) or len(html.encode()) > 2 * 1024 * 1024
                         or not isinstance(token, str) or not 32 <= len(token) <= 128):
                     raise ValueError('Invalid registration')
@@ -60,7 +74,9 @@ class PreviewHub:
                     raise ValueError('Invalid session or duplicate preview')
                 if sum(v['sid'] == sid for v in self.views.values()) >= 16:
                     raise ValueError('Maximum 16 previews per session')
-                row = dict(sid=sid, html=html, token=token, snapshot=snapshot(registration.get('snapshot')))
+                now = datetime.now(timezone.utc).isoformat()
+                row = dict(sid=sid, html=html, token=token, name=name, created_at=now, updated_at=now,
+                           snapshot=snapshot(registration.get('snapshot')))
                 self.views[pid] = row
                 await ws.send_json({'ok': True})
                 while self.sessions.get(sid) == key and self.views.get(pid) is row:
@@ -76,6 +92,7 @@ class PreviewHub:
                         value = snapshot(message.get('snapshot'))
                         if value['revision'] > row['snapshot']['revision']:
                             row['snapshot'] = value
+                            row['updated_at'] = datetime.now(timezone.utc).isoformat()
                     elif message.get('type') != 'ping':
                         raise ValueError('Unknown producer message')
                     await ws.send_json({'ok': True})

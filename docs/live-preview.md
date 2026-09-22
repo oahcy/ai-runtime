@@ -92,3 +92,17 @@ info() 获取链接，snapshot() 读取状态，stop() 停止预览。状态不�
 - 在 ai-runtime 以外直接使用 Preview 时，保留独立本机随机端口模式，生命周期由调用者负责。嵌入式部署可使用 create_app(..., preview_url="http://127.0.0.1:端口") 指定主服务地址。
 
 升级后需重启 ai-runtime 服务并创建新会话。旧 kernel 中已导入的类不会自动切换托管方式。
+
+## 查询运行中的预览
+
+在 /docs 点击 Authorize，使用主服务 token 授权，然后展开 GET /previews，点击 Try it out → Execute。
+返回 previews 数组，每项包含 id、session_id、name、running、url、revision、created_at、updated_at。
+可填写可选的 session_id 参数，仅查看一个会话。无预览时返回空数组。
+
+url 包含浏览器访问凭证，可直接打开；接口要求主服务授权，响应禁止缓存。
+updated_at 是主服务收到最新状态版本的 UTC 时间，心跳不会刷新这个时间。
+只列出主服务当前托管的预览；停止、断开或所属会话结束后移出列表，不包含历史记录或独立端口模式。
+
+插件通过 context.preview.create(..., name="实验名称") 指定名称；
+直接使用 Preview(..., name="实验名称") 也支持，默认名称为 preview。
+名称长度为 1–128 个字符，不能全为空白。

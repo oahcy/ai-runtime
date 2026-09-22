@@ -151,7 +151,7 @@ class PreviewService:
     def create(self, *, html=None, state=None, name='preview'):
         from .preview import Preview
         self._resources.ensure_open()
-        view = Preview(html=html, state=state)
+        view = Preview(html=html, state=state, name=name)
         resource = self._resources.register(name, view.stop, kind='preview')
         return ManagedPreview(view, resource)
 

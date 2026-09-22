@@ -69,6 +69,12 @@ def create_app(root: Path, token: str, *, preview_url: str | None = None):
 
     secured = [Depends(authorize)]
 
+    @app.get('/previews', dependencies=secured, tags=['previews'])
+    async def previews(request: Request, session_id: str | None = None):
+        """List active hosted previews; optionally filter by session_id. URLs include viewer credentials."""
+        base = app.state.runtime.preview_url or str(request.base_url).rstrip('/')
+        return JSONResponse({'previews': hub.list(base, session_id)}, headers={'Cache-Control': 'no-store'})
+
     @app.exception_handler(KeyError)
     async def missing(request, exc):
         return JSONResponse({'detail': str(exc)}, status_code=404)

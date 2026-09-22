@@ -12,7 +12,7 @@ RANGES = dict(hue=(0, 360), speed=(0, 3), particles=(0, 2000),
 class NeonPreview:
     def __init__(self, context=None):
         factory = context.preview.create if context else Preview
-        self._view = factory(html=Path(__file__).with_name('neon.html').read_text(encoding="utf-8"), state=DEFAULTS)
+        self._view = factory(name='effects / neon', html=Path(__file__).with_name('neon.html').read_text(encoding="utf-8"), state=DEFAULTS)
 
     def update(self, *, message="Scene updated", **changes):
         for key, value in changes.items():

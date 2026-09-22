@@ -35,7 +35,10 @@ def render_html(html):
 
 
 class Preview:
-    def __init__(self, *, html=None, state=None):
+    def __init__(self, *, html=None, state=None, name="preview"):
+        if not isinstance(name, str) or not name.strip() or len(name) > 128:
+            raise ValueError("name must be a nonempty string of at most 128 characters")
+        self.name = name
         self._lock = threading.Lock()
         if html is not None and not isinstance(html, str):
             raise ValueError("html must be a string")
