@@ -52,3 +52,33 @@ evaluate 原样返回 CDP 结果；JavaScript 异常见 exceptionDetails。V8-on
 MCP 无需新增专属工具：call_plugin 的 plugin_id 为 chrome-devtools，action/arguments 对应上表。先 wait_execution，再 read_events 获取结果。外层执行 timeout 应大于插件内部 timeout（例如 60 秒与 10 秒）。
 
 协议参考：[Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)。
+
+
+## 0.2 连接诊断与启动探测
+
+connect 默认关闭 WebSocket ping 心跳，兼容本次遇到的原生 inspector。可显式传 heartbeat=true 启用（需要当前 websockets 支持）。关闭心跳不保证识别半开连接，仍通过命令超时诊断。连接不会自动重连或重放指令。
+
+status 将三个概念分开：
+- transport：connected / disconnected，只描述 WebSocket。
+- responsiveness：unknown / responsive / unresponsive，依据最近响应或超时，不能保证下一条指令成功。
+- execution：按 CDP session ID 记录收到的 paused / running；未收到事件时没有对应条目，不能凭超时断言应用正在等待调试器。
+
+同时返回收发时间、最近事件、关闭码与原因、最近 50 条命令元数据及迟到响应计数。不会在诊断历史保存表达式、参数或响应正文。迟到响应会更新对应记录，绝不作为后续指令的结果。超过历史容量的旧响应不再关联统计。重连清空这些连接诊断，保留上次断开原因，清空旧目标事件，避免混入上一次调试的脚本；事件序号不回退，connect 返回本连接起始 cursor。
+
+~~~python
+dev.call("connect", {"url": debugger_url})
+report = dev.call("prepare", {"timeout": 6})
+print(report)
+# 已知应用正等待调试器启动，并希望它继续启动时，显式使用：
+report = dev.call("prepare", {"release_wait": True, "timeout": 6})
+~~~
+
+prepare 使用一个总时间预算，按顺序执行可选 runIfWaitingForDebugger、Runtime.enable、Debugger.enable、简单求值。第一处失败就停止，返回步骤结果和诊断，不连发多条超时指令。收到 paused 时停止求值，不自动 resume。release_wait=true 会改变应用执行状态，不能仅因为超时就猜测需要它；返回 ready 只确认简单求值成功，不代表页面启动成功。
+
+这些操作启用协议域，并不设置断点、修改业务变量或自动重启应用。业务启动错误结合 [ADB diagnose](../adb/README.md) 检查。
+
+旧安装更新清单：
+~~~powershell
+.\.venv\Scripts\python.exe -m ai_runtime.plugins refresh chrome-devtools
+~~~
+已加载旧版本的会话先 unload 再 load；此操作关闭该会话的调试连接。

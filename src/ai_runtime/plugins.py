@@ -101,6 +101,20 @@ class Catalog:
         plugin_event('plugin.registered' if not row else 'plugin.registration_reused', plugin=manifest['id'], version=manifest['version'], path=str(path))
         return self.get(manifest['id'])
 
+    def refresh(self, plugin_id):
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT path FROM plugins WHERE id=?', (plugin_id,)).fetchone()
+            if row is None:
+                raise KeyError(f'Plugin not registered: {plugin_id}')
+            manifest = read_manifest(row[0])
+            if manifest['id'] != plugin_id:
+                raise ValueError('Cannot change plugin id during refresh')
+            db.execute('UPDATE plugins SET manifest=? WHERE id=?',
+                       (json.dumps(manifest, sort_keys=True, allow_nan=False), plugin_id))
+        plugin_event('plugin.refreshed', plugin=plugin_id, version=manifest['version'])
+        return self.get(plugin_id)
+
 
 @dataclass(frozen=True)
 class PluginContext:
@@ -257,6 +271,7 @@ def main():
     parser.add_argument('--data-dir', type=Path, default=Path('.runtime'))
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('list')
+    refresh = sub.add_parser('refresh'); refresh.add_argument('plugin_id')
     get = sub.add_parser('get'); get.add_argument('plugin_id')
     add = sub.add_parser('add'); add.add_argument('path', type=Path)
     new = sub.add_parser('new'); new.add_argument('path', type=Path); new.add_argument('--id', required=True)
@@ -266,6 +281,7 @@ def main():
     else:
         catalog = Catalog(args.data_dir)
         if args.command == 'list': result = catalog.list()
+        elif args.command == 'refresh': result = catalog.refresh(args.plugin_id)
         elif args.command == 'get': result = catalog.get(args.plugin_id)
         else: result = catalog.add(args.path.resolve())
     print(json.dumps(result, ensure_ascii=False, indent=2))

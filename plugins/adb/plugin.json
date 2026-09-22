@@ -1,7 +1,7 @@
 {
   "id": "adb",
   "name": "ADB 工具",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api_version": 1,
   "description": "设备选择、Shell、应用启动、日志、转发和 PNG 截图。需要本机 Android platform-tools。",
   "entry": "plugin.py",
@@ -67,6 +67,14 @@
         "args": "nonempty string array, no leading global flags",
         "serial": "optional device serial",
         "timeout": "default15 seconds"
+      }
+    },
+    "diagnose": {
+      "description": "Read-only bounded package startup diagnosis: device, power, foreground, PIDs, filtered logs. Returns partial report on failure; no wake/restart.",
+      "parameters": {
+        "package": "required Android package name",
+        "serial": "optional device serial",
+        "timeout": "total seconds default 12"
       }
     }
   }

@@ -26,7 +26,7 @@ ai-runtime/
 
 默认清单在当前目录的 .runtime/plugins.sqlite3。服务使用自定义 data-dir 时，在子命令前加 `--data-dir 绝对路径`。
 add 注册本机现有目录，不复制目录、不下载、不运行 pip、不导入代码。重复注册相同目录和清单为幂等；同 ID 不同路径或清单会被拒绝。源目录需保留。
-清单变更在加载前检测，版本 1 不提供升级、删除注册或远程商店；unload 只卸载本会话实例。
+清单变更在加载前检测，支持显式刷新同路径清单，不提供远程升级、删除注册或远程商店；unload 只卸载本会话实例。
 插件是可信本机 Python 代码，权限等同 kernel，接口不是安全沙箱。
 
 ## 获取、新增、运行
@@ -147,3 +147,10 @@ context.logger.error("读取失败", error_type="TimeoutError")
 - [ADB](../plugins/adb/README.md)：设备选择、shell、logcat、截图和端口转发。
 
 各插件目录需分别 add 注册。新增注册不需要重启服务；list_plugins 可立即发现，call_plugin 首次调用自动加载。
+
+
+## 更新本地插件清单
+
+python -m ai_runtime.plugins refresh 插件ID 重新校验已注册目录中的 plugin.json，事务性更新其元数据。不允许改变 ID 或注册路径，不导入代码、不热替换运行实例。单纯 add 仍拒绝不同清单，避免无意覆盖注册。
+
+现有会话需要明确 unload/load，新会话直接加载新版本。新增动作不需要重启主服务；如果 MCP 客户端仍显示旧工具说明，需要重新连接该 MCP 服务以刷新工具列表，不能靠重启 HTTP 服务刷新已运行的 STDIO Adapter。

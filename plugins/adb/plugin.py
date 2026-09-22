@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import math
+import time
 from ai_runtime.sdk import save_artifact
 
 
@@ -70,13 +71,86 @@ class Adb:
         if len(ready)!=1: raise ValueError('Specify serial: expected exactly one ready device')
         return ready[0]['serial']
 
+    def _diagnose(self, arguments):
+        package = arguments.get('package')
+        if not isinstance(package, str) or not re.fullmatch(r'[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+', package):
+            raise ValueError('package must be an Android package name')
+        seconds = arguments.get('timeout', 12)
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or not .1 <= seconds <= 120:
+            raise ValueError('timeout must be 0.1..120 seconds')
+        serial = arguments.get('serial', self.serial)
+        if serial is not None and (not isinstance(serial, str) or not serial):
+            raise ValueError('serial must be a nonempty string')
+        deadline = time.monotonic() + seconds
+        report = {'package': package, 'serial': serial, 'errors': [], 'findings': []}
+
+        def run(label, args):
+            remaining = deadline - time.monotonic()
+            if remaining < .1:
+                report['errors'].append({'step': label, 'error': 'budget_exhausted'})
+                return None
+            try:
+                result = self._run(args, min(remaining, 5))
+            except Exception as exc:
+                report['errors'].append({'step': label, 'error': type(exc).__name__})
+                return None
+            if result['returncode']:
+                report['errors'].append({'step': label, 'returncode': result['returncode']})
+                return None
+            if result['truncated']:
+                report['errors'].append({'step': label, 'error': 'output_truncated'})
+            return result['stdout']
+
+        devices = run('devices', ['devices', '-l'])
+        if devices is None:
+            return report
+        ready = [p[0] for line in devices.splitlines() if len(p := line.split()) >= 2 and p[1] == 'device']
+        if serial is None and len(ready) == 1:
+            serial = ready[0]
+        if serial not in ready:
+            report['errors'].append({'step': 'device_selection', 'error': 'Specify exactly one ready device'})
+            return report
+        report['serial'] = serial
+        prefix = ['-s', serial]
+        power = run('power', prefix + ['shell', 'dumpsys', 'power'])
+        report['power'] = [x.strip() for x in (power or '').splitlines() if 'mWakefulness=' in x][:2]
+        window = run('foreground', prefix + ['shell', 'dumpsys', 'window'])
+        report['foreground'] = [x.strip()[:500] for x in (window or '').splitlines() if 'mCurrentFocus=' in x][:2]
+        pids = run('pid', prefix + ['shell', 'pidof', package])
+        pid = (pids or '').split()
+        report['pids'] = [x for x in pid if x.isdigit()]
+        if not report['pids']:
+            report['findings'].append('No running process found for package')
+            return report
+        # Collect the exact package process, not unrelated system/app logs.
+        logs = run('logcat', prefix + ['logcat', '-d', '--pid=' + ','.join(report['pids']), '-t', '2000'])
+        candidates = []
+        for line in (logs or '').splitlines():
+            lower = line.lower()
+            if any(word in lower for word in ('authorization', 'token', 'password', 'secret', 'signature', 'cookie', 'decrypt:', 'okhttp')):
+                continue
+            if any(word in lower for word in ('error', 'exception', 'fatal', 'failure', 'not found', 'debugger', 'loadmodule', 'game script started')):
+                # Avoid leaking URL query credentials in diagnostic excerpts.
+                line = re.sub(r'(https?://[^\s?#]+)[?#][^\s]*', r'\1?<redacted>', line)
+                candidates.append(line[:500])
+                if 'download failure' in lower and 'not found' in lower:
+                    report['findings'].append('Resource download reported Not Found; verify deployment path and resource URL')
+        report['logs'] = candidates[-120:]
+        report['findings'] = list(dict.fromkeys(report['findings']))
+        report['log_scope'] = 'last 2000 lines for selected package PIDs; filtered and best-effort redacted'
+        self.context.logger.info('ADB diagnosis completed', device=serial, package=package,
+                                 findings=len(report['findings']), errors=len(report['errors']))
+        return report
+
     def call(self, action, arguments):
         a=dict(arguments)
         allowed={'configure':{'adb_path','serial'},'status':set(),'devices':set(),
+            'diagnose':{'package','serial','timeout'},
             'shell':{'command','serial','timeout'},'screenshot':{'serial','timeout'},
             'logcat':{'lines','serial','timeout'},'start_app':{'component','serial','timeout'},
             'forward':{'local','remote','serial','timeout'},'run':{'args','serial','timeout'}}
         if action not in allowed or set(a)-allowed[action]: raise ValueError('Unknown action or parameters')
+        if action=='diagnose': return self._diagnose(a)
         if action=='configure':
             candidate=self.executable
             if 'adb_path' in a:

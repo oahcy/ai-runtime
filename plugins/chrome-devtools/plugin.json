@@ -1,7 +1,7 @@
 {
   "id": "chrome-devtools",
   "name": "Chrome DevTools 调试",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api_version": 1,
   "description": "持久 CDP 连接、表达式执行、事件游标和截图；支持本机 Chrome 或兼容 V8 调试端口。",
   "entry": "plugin.py",
@@ -17,7 +17,8 @@
       "description": "Connect a persistent debugger WebSocket",
       "parameters": {
         "url": "loopback ws/wss URL or devtools://...inspector.html?ws=...",
-        "timeout": "0.1..120 seconds"
+        "timeout": "0.1..120 seconds",
+        "heartbeat": "boolean default false for native inspector compatibility"
       }
     },
     "command": {
@@ -55,12 +56,20 @@
       }
     },
     "status": {
-      "description": "Read current connection status",
+      "description": "Transport, responsiveness, observed pause state, timestamps, close reason, bounded command history and late responses",
       "parameters": {}
     },
     "disconnect": {
       "description": "Close this debugger connection",
       "parameters": {}
+    },
+    "prepare": {
+      "description": "Bounded startup probe; stops at first failure, never automatically resumes breakpoints or retries",
+      "parameters": {
+        "release_wait": "boolean default false; true explicitly sends runIfWaitingForDebugger and may start application",
+        "timeout": "total budget seconds, default 6",
+        "session_id": "optional flattened CDP session ID"
+      }
     }
   }
 }

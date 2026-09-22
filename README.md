@@ -127,6 +127,7 @@ Runtime 管理注册清单、会话内加载和生命周期；具体效果与外
 - [effects 效果测试插件](plugins/effects/README.md)：霓虹与风洞
 - [chrome-devtools 调试插件](plugins/chrome-devtools/README.md)：持久 CDP 连接、求值、事件和页面截图
 - [adb 工具插件](plugins/adb/README.md)：设备、命令、日志、截图与端口转发
+- [应用启动诊断](examples/diagnose_app.py)：先看 ADB 启动日志，再限时探测 DevTools
 - [效果插件调用示例](examples/effects_plugin.py) / [设备插件调用示例](examples/device_plugins.py)
 
 先注册：`.\.venv\Scripts\python.exe -m ai_runtime.plugins add D:/prj/ai-runtime/plugins/effects`。

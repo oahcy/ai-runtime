@@ -6,6 +6,8 @@ import json
 import math
 import re
 import threading
+import time
+from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
 from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler
 from websockets.sync.client import connect
@@ -50,6 +52,74 @@ class DevTools:
         self.request_id = 0
         self.url = None
         self.last_error = None
+        self.last_disconnect = None
+        self.activity = {}
+        self.protocol = {}
+        self.history = deque(maxlen=50)
+        self.response_count = 0
+        self.timed_out = 0
+        self.late_responses = 0
+        self.last_outcome = None
+        self.heartbeat = False
+
+    @staticmethod
+    def _now():
+        return datetime.now(timezone.utc).isoformat()
+
+    def _status(self):
+        with self.lock:
+            return {
+                'connected': self.ws is not None, 'url': self.url,
+                'last_error': self.last_error, 'last_disconnect': self.last_disconnect,
+                'transport': 'connected' if self.ws is not None else 'disconnected',
+                'responsiveness': ('unresponsive' if self.last_outcome == 'timeout' else
+                                   'responsive' if self.last_outcome == 'response' else 'unknown'),
+                'execution': dict(self.protocol), 'activity': dict(self.activity),
+                'responses': self.response_count, 'timeouts': self.timed_out,
+                'late_responses': self.late_responses, 'heartbeat': self.heartbeat,
+                'pending': len(self.pending), 'recent_commands': [dict(x) for x in self.history],
+            }
+
+    def _prepare(self, arguments):
+        seconds = timeout(arguments.get('timeout', 6))
+        release = arguments.get('release_wait', False)
+        session = arguments.get('session_id')
+        if type(release) is not bool:
+            raise ValueError('release_wait must be boolean')
+        if session is not None and (not isinstance(session, str) or not session):
+            raise ValueError('session_id must be a nonempty CDP session string')
+        deadline = time.monotonic() + seconds
+        steps = []
+        commands = []
+        if release:
+            commands.append(('Runtime.runIfWaitingForDebugger', {}))
+        commands += [('Runtime.enable', {}),
+                     ('Debugger.enable', {}),
+                     ('Runtime.evaluate', {'expression': '1 + 1', 'returnByValue': True, 'awaitPromise': False})]
+        for method, params in commands:
+            remaining = deadline - time.monotonic()
+            if remaining < .1:
+                steps.append({'method': method, 'status': 'budget_exhausted'})
+                break
+            try:
+                result = self._command(method, params, remaining, session)
+                if method == 'Runtime.evaluate' and result.get('result', {}).get('value') != 2:
+                    steps.append({'method': method, 'status': 'probe_failed'})
+                    break
+                steps.append({'method': method, 'status': 'ok'})
+                if method == 'Debugger.enable':
+                    with self.lock:
+                        paused = self.protocol.get(session or 'default') == 'paused'
+                    if paused:
+                        steps.append({'method': 'Runtime.evaluate', 'status': 'paused'})
+                        break
+            except (TimeoutError, RuntimeError, ValueError) as exc:
+                steps.append({'method': method, 'status': type(exc).__name__})
+                break
+        ready = bool(steps and steps[-1] == {'method': 'Runtime.evaluate', 'status': 'ok'})
+        return {'ready': ready, 'steps': steps, 'diagnostics': self._status(),
+                'next': ('Read application state and exceptions' if ready else
+                         'Inspect ADB diagnose and events; no retry or resume was performed automatically')}
 
     def _receive(self, ws):
         error = 'Debugger disconnected'
@@ -59,12 +129,29 @@ class DevTools:
                 if not isinstance(message, dict):
                     continue
                 with self.lock:
+                    self.activity['last_receive'] = self._now()
                     if 'id' in message:
+                        self.response_count += 1
+                        self.last_outcome = 'response'
+                        historical = next((x for x in self.history if x['id'] == message['id']), None)
+                        if historical is not None:
+                            was_timeout = historical['outcome'] == 'timeout'
+                            historical.update(outcome='error' if 'error' in message else 'ok',
+                                              received_at=self._now(), late=was_timeout)
+                            if was_timeout:
+                                self.late_responses += 1
                         waiter = self.pending.get(message['id'])
                         if waiter:
                             waiter['response'] = message
                             waiter['done'].set()
                     elif 'method' in message:
+                        key = message.get('sessionId', 'default')
+                        method = message['method']
+                        if method == 'Debugger.paused':
+                            self.protocol[key] = 'paused'
+                        elif method == 'Debugger.resumed':
+                            self.protocol[key] = 'running'
+                        self.activity['last_event'] = method
                         self.sequence += 1
                         if len(raw) > 32768:
                             message = {'method': message['method'], 'truncated': True, 'original_bytes': len(raw)}
@@ -80,8 +167,16 @@ class DevTools:
                 if self.ws is ws:
                     self.ws = None
                     self.last_error = error
+                    self.last_disconnect = {
+                        'time': self._now(), 'error': error,
+                        'code': getattr(ws, 'close_code', None),
+                        'reason': str(getattr(ws, 'close_reason', '') or '')[:300],
+                    }
                 for waiter in self.pending.values():
                     if not waiter['done'].is_set():
+                        entry = next((x for x in self.history if x['outcome'] == 'pending' and self.pending.get(x['id']) is waiter), None)
+                        if entry is not None:
+                            entry['outcome'] = 'disconnected'
                         waiter['error'] = error
                         waiter['done'].set()
 
@@ -101,16 +196,32 @@ class DevTools:
                 self.request_id += 1
                 rid = self.request_id
                 self.pending[rid] = waiter
+                record = {'id': rid, 'method': method, 'session_id': session_id,
+                          'sent_at': self._now(), 'outcome': 'pending'}
+                self.history.append(record)
+                self.activity['last_send'] = record['sent_at']
             message = {'id': rid, 'method': method, 'params': params}
             if session_id is not None: message['sessionId'] = session_id
             try:
                 ws.send(json.dumps(message, allow_nan=False))
             except Exception:
-                with self.lock: self.pending.pop(rid, None)
+                with self.lock:
+                    self.pending.pop(rid, None)
+                    record['outcome'] = 'send_failed'
                 raise RuntimeError('CDP send failed; outcome may be unknown, inspect before retry') from None
         try:
             if not waiter['done'].wait(seconds):
-                raise TimeoutError(f'CDP {method} timed out; outcome unknown, no automatic retry')
+                with self.lock:
+                    # A response arriving at the deadline must not be reported as a timeout.
+                    expired = not waiter['done'].is_set()
+                    if expired:
+                        self.pending.pop(rid, None)
+                        record['outcome'] = 'timeout'
+                        self.timed_out += 1
+                        self.last_outcome = 'timeout'
+                if expired:
+                    self.context.logger.warning('Debugger command timed out', method=method, request_id=rid)
+                    raise TimeoutError(f'CDP {method} timed out; outcome unknown, no automatic retry')
             if 'error' in waiter: raise RuntimeError(waiter['error'] + '; outcome may be unknown')
             response = waiter['response']
             if 'error' in response:
@@ -122,13 +233,16 @@ class DevTools:
     def call(self, action, arguments):
         a = dict(arguments)
         allowed = {
-            'targets': {'endpoint', 'timeout'}, 'connect': {'url', 'timeout'},
+            'targets': {'endpoint', 'timeout'}, 'connect': {'url', 'timeout', 'heartbeat'},
+            'prepare': {'release_wait', 'timeout', 'session_id'},
             'command': {'method', 'params', 'timeout', 'session_id'},
             'evaluate': {'expression', 'await_promise', 'return_by_value', 'context_id', 'timeout', 'session_id'},
             'events': {'after', 'limit'}, 'screenshot': {'timeout', 'session_id'},
             'status': set(), 'disconnect': set()
         }
         if action not in allowed or set(a) - allowed[action]: raise ValueError('Unknown action or parameters')
+        if action == 'prepare':
+            return self._prepare(a)
         if action == 'targets':
             endpoint = a.get('endpoint', 'http://127.0.0.1:9222')
             parsed = urlparse(endpoint)
@@ -144,17 +258,33 @@ class DevTools:
         if action == 'connect':
             url=websocket_url(a.get('url'))
             seconds=timeout(a.get('timeout',10))
+            heartbeat = a.get('heartbeat', False)
+            if type(heartbeat) is not bool:
+                raise ValueError('heartbeat must be boolean')
+            if heartbeat and 'ping_interval' not in inspect.signature(connect).parameters:
+                raise ValueError('Heartbeat needs a websockets version supporting ping_interval')
             self.close()
             options=dict(open_timeout=seconds, close_timeout=1, max_size=8*1024*1024)
             if 'proxy' in inspect.signature(connect).parameters: options['proxy']=None
+            if 'ping_interval' in inspect.signature(connect).parameters:
+                options['ping_interval'] = 20 if heartbeat else None
             ws=connect(url,**options)
+            with self.lock:
+                self.event_buffer.clear()
+                start_cursor = self.sequence
+                self.protocol.clear()
+                self.activity.clear()
+                self.history.clear()
+                self.response_count = self.timed_out = self.late_responses = 0
+                self.last_outcome = None
+                self.heartbeat = heartbeat
             self.ws,self.url,self.last_error=ws,url,None
             self.reader=threading.Thread(target=self._receive,args=(ws,),daemon=True,name='cdp-events')
             self.reader.start()
             self.context.logger.info('Debugger connected')
-            return {'connected':True,'url':url}
+            return {'connected':True,'url':url,'cursor':start_cursor}
         if action == 'status':
-            return {'connected':self.ws is not None,'url':self.url,'last_error':self.last_error}
+            return self._status()
         if action == 'disconnect':
             self.close()
             return {'connected':False}

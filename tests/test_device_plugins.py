@@ -58,6 +58,11 @@ def test_cdp_real_socket_events_late_reply_error_and_cleanup(tmp_path, monkeypat
             cdp.call('command',{'method':'Test.slow','timeout':.1})
         # The timed-out command's late response must not satisfy the next command.
         assert cdp.call('command',{'method':'Runtime.enable'})['method']=='Runtime.enable'
+        status=cdp.call('status')
+        assert status['timeouts']==1 and status['late_responses']==1
+        assert any(x['method']=='Test.slow' and x.get('late') for x in status['recent_commands'])
+        assert status['responsiveness']=='responsive'
+        assert status['heartbeat'] is False
         with pytest.raises(RuntimeError,match='unsupported'):
             cdp.call('command',{'method':'Test.error'})
         artifact=cdp.call('screenshot',{})['artifact']
@@ -68,6 +73,9 @@ def test_cdp_real_socket_events_late_reply_error_and_cleanup(tmp_path, monkeypat
                 obj.event_buffer.append({'seq':seq,'method':'test'})
             obj.sequence=seq
         assert cdp.call('events',{'after':0})['dropped']
+        connection=cdp.call('connect',{'url':f'ws://127.0.0.1:{port}/new'})
+        assert cdp.call('events',{'after':connection['cursor']})['events']==[]
+        assert cdp.call('status')['responses']==0
         m.unload('chrome-devtools')
         assert obj.reader is None and obj.ws is None
     finally:
@@ -140,3 +148,78 @@ def test_adb_nonzero_timeout_and_output_limit(tmp_path,monkeypatch):
     with pytest.raises(TimeoutError,match='remote effects may remain'):
         adb._instance._run(['test'])
     m.close()
+
+def test_prepare_explicit_startup_order_pause_and_disconnect(tmp_path):
+    methods=[]
+    def target(ws):
+        for raw in ws:
+            req=json.loads(raw);method=req['method'];methods.append(method)
+            if method=='Debugger.enable':
+                ws.send(json.dumps({'method':'Debugger.paused','params':{'reason':'other','callFrames':[]}}))
+            ws.send(json.dumps({'id':req['id'],'result':{}}))
+            if method=='Test.close':
+                ws.close(1001,'test shutdown')
+    server=serve(target,'127.0.0.1',0)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    m,cdp=loaded(tmp_path,'chrome-devtools')
+    try:
+        cdp.call('connect',{'url':f'ws://127.0.0.1:{server.socket.getsockname()[1]}'})
+        assert cdp.call('status')['responsiveness']=='unknown'
+        report=cdp.call('prepare',{'release_wait':True,'timeout':2})
+        assert methods==['Runtime.runIfWaitingForDebugger','Runtime.enable','Debugger.enable']
+        assert not report['ready'] and report['steps'][-1]['status']=='paused'
+        assert report['diagnostics']['execution']['default']=='paused'
+        cdp.call('command',{'method':'Test.close'})
+        cdp._instance.reader.join(2)
+        status=cdp.call('status')
+        assert not status['connected']
+        assert status['last_disconnect']['code']==1001
+        assert status['last_disconnect']['reason']=='test shutdown'
+    finally:
+        m.close();server.shutdown();thread.join(3)
+
+
+def test_prepare_stops_at_first_timeout_without_release_or_resume(tmp_path):
+    methods=[]
+    release=threading.Event()
+    def target(ws):
+        req=json.loads(ws.recv());methods.append(req['method'])
+        release.wait(2)
+    server=serve(target,'127.0.0.1',0)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    m,cdp=loaded(tmp_path,'chrome-devtools')
+    try:
+        cdp.call('connect',{'url':f'ws://127.0.0.1:{server.socket.getsockname()[1]}'})
+        report=cdp.call('prepare',{'timeout':.15})
+        assert not report['ready']
+        assert methods==['Runtime.enable']
+        assert report['diagnostics']['responsiveness']=='unresponsive'
+        assert report['steps'][0]['status']=='TimeoutError'
+    finally:
+        release.set();m.close();server.shutdown();thread.join(3)
+
+
+def test_adb_diagnose_filters_secrets_and_retains_partial_report(tmp_path,monkeypatch):
+    m,adb=loaded(tmp_path,'adb')
+    def run(args, seconds=15, binary=False):
+        if args==['devices','-l']: output='List of devices attached\none device\n'
+        elif args[-1]=='power': raise TimeoutError('timeout')
+        elif args[-1]=='window': output='mCurrentFocus=Window{test.app/Main}'
+        elif 'pidof' in args: output='123\n'
+        else:
+            assert '--pid=123' in args
+            output=('E runtime: http://host/path?key=hidden download failure:Not Found\n'
+                    'E runtime: Authorization: Bearer hidden\n'
+                    'E okhttp.OkHttpClient: error secret-content\n'
+                    'D runtime: LoadModule success main.js')
+        return {'returncode':0,'stdout':output,'stderr':'','truncated':False}
+    monkeypatch.setattr(adb._instance,'_run',run)
+    try:
+        report=adb.call('diagnose',{'package':'test.app'})
+        assert report['errors']==[{'step':'power','error':'TimeoutError'}]
+        assert report['pids']==['123'] and report['findings']
+        assert 'hidden' not in json.dumps(report) and 'secret-content' not in json.dumps(report)
+        assert 'Not Found' in json.dumps(report)
+        with pytest.raises(ValueError):
+            adb.call('diagnose',{'package':'test.app; rm'})
+    finally: m.close()

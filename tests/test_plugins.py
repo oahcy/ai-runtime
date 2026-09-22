@@ -150,3 +150,21 @@ def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path, caplog):
             assert event in messages
         assert sid[:8] in messages
         assert 'test-token' not in messages
+
+
+def test_refresh_manifest_is_explicit_validated_and_metadata_only(tmp_path):
+    folder=Path(scaffold(tmp_path/'demo','demo'))
+    catalog=Catalog(tmp_path/'data')
+    catalog.add(folder)
+    manifest=read_manifest(folder)
+    manifest['version']='0.2.0'
+    (folder/'plugin.json').write_text(json.dumps(manifest))
+    (folder/'plugin.py').write_text('raise RuntimeError("must not import")')
+    with pytest.raises(ValueError):
+        catalog.add(folder)
+    assert catalog.refresh('demo')['manifest']['version']=='0.2.0'
+    manifest['id']='changed'
+    (folder/'plugin.json').write_text(json.dumps(manifest))
+    with pytest.raises(ValueError,match='Cannot change'):
+        catalog.refresh('demo')
+    assert catalog.get('demo')['manifest']['id']=='demo'
