@@ -2,23 +2,33 @@
 import asyncio
 import copy
 import json
-import math
 import secrets
 import socket
 import threading
 import time
-from pathlib import Path
 
-DEFAULTS = dict(hue=190.0, speed=0.65, particles=650, glow=0.8,
-                rings=5, spread=1.0, title='NEON SINGULARITY')
-RANGES = dict(hue=(0, 360), speed=(0, 3), particles=(0, 2000),
-              glow=(0, 1.5), rings=(1, 10), spread=(0.5, 1.5))
+DEFAULT_HTML = """<!doctype html><meta charset="utf-8"><title>Runtime state preview</title>
+<style>body{background:#0c1421;color:#cce6e9;font:15px monospace;padding:30px}pre{white-space:pre-wrap}</style>
+<h1>Live state</h1><p id="status">Connecting…</p><pre id="state"></pre>
+<script>
+function connect(){const ws=new WebSocket('ws://'+location.host+'/ws');
+ws.onopen=()=>ws.send(JSON.stringify({token:location.hash.slice(1)}));
+ws.onmessage=e=>{document.getElementById('status').textContent='Connected';
+document.getElementById('state').textContent=JSON.stringify(JSON.parse(e.data),null,2)};
+ws.onclose=e=>{document.getElementById('status').textContent=e.code===1008?'Invalid credential':'Disconnected';
+if(e.code!==1008)setTimeout(connect,1500)};ws.onerror=()=>ws.close()}connect();
+</script>"""
 
 
 class Preview:
-    def __init__(self):
+    def __init__(self, *, html=None, state=None):
         self._lock = threading.Lock()
-        self._state = dict(DEFAULTS)
+        if html is not None and not isinstance(html, str):
+            raise ValueError("html must be a string")
+        if state is not None and not isinstance(state, dict):
+            raise ValueError("state must be a JSON object")
+        self._html = DEFAULT_HTML if html is None else html
+        self._state = json.loads(json.dumps({} if state is None else state, allow_nan=False))
         self._revision = 0
         self._history = []
         self._server = self._thread = self._socket = None
@@ -27,29 +37,19 @@ class Preview:
 
     def snapshot(self):
         with self._lock:
-            return dict(revision=self._revision, state=dict(self._state),
+            return dict(revision=self._revision, state=copy.deepcopy(self._state),
                         history=copy.deepcopy(self._history))
 
     def update(self, *, message='Scene updated', **changes):
         if not isinstance(message, str) or len(message) > 300:
             raise ValueError('message must be a string of at most 300 characters')
-        for key, value in changes.items():
-            if key == 'title':
-                if not isinstance(value, str) or len(value) > 80:
-                    raise ValueError('title must be a string of at most 80 characters')
-            elif key in RANGES:
-                low, high = RANGES[key]
-                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not low <= value <= high:
-                    raise ValueError(f'{key} must be between {low} and {high}')
-                if key in ('particles', 'rings') and not isinstance(value, int):
-                    raise ValueError(f'{key} must be an integer')
-            else:
-                raise ValueError(f'Unknown scene parameter: {key}')
+        # Round-trip both validates JSON and detaches caller-owned nested values.
+        changes = json.loads(json.dumps(changes, allow_nan=False))
         with self._lock:
             self._state.update(changes)
             self._revision += 1
             self._history.append(dict(revision=self._revision, message=message,
-                                      changes=dict(changes), time=time.time()))
+                                      changes=copy.deepcopy(changes), time=time.time()))
             self._history = self._history[-30:]
         return self.snapshot()
 
@@ -62,7 +62,7 @@ class Preview:
 
         @app.get('/')
         async def page():
-            html = Path(__file__).with_name('preview.html').read_text(encoding='utf-8')
+            html = self._html
             return HTMLResponse(html, headers={
                 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
                 'X-Content-Type-Options': 'nosniff',

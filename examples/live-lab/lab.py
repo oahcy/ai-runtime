@@ -10,7 +10,7 @@ from ai_runtime.preview import Preview
 
 class WindTunnel(Preview):
     def __init__(self, count=600, seed=42):
-        super().__init__()
+        super().__init__(html=Path(__file__).with_name("index.html").read_text(encoding="utf-8"))
         if not isinstance(count, int) or not 10 <= count <= 1500:
             raise ValueError('count must be an integer between 10 and 1500')
         rng = random.Random(seed)
@@ -113,17 +113,6 @@ class WindTunnel(Preview):
             delay=deadline-time.monotonic()
             if delay<0: deadline=time.monotonic();delay=0
             self._stop.wait(delay)
-
-    def _app(self):
-        from fastapi.responses import HTMLResponse
-        app=super()._app()
-        app.router.routes[:]=[r for r in app.router.routes if r.path!='/']
-        @app.get('/')
-        async def page():
-            return HTMLResponse(Path(__file__).with_name('index.html').read_text(encoding='utf-8'),
-                headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer',
-                    'Content-Security-Policy':"default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'"})
-        return app
 
     def start(self,port=0):
         info=super().start(port)

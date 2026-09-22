@@ -22,7 +22,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests", "examples/live-lab"]
-
-[tool.setuptools.package-data]
-ai_runtime = ["preview.html"]
+testpaths = ["tests", "examples/live-lab", "examples/neon"]
