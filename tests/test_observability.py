@@ -18,3 +18,20 @@ def test_logging_setup_does_not_duplicate_handlers():
     configure_logging()
     configure_logging()
     assert sum(bool(getattr(h, '_runtime_handler', False)) for h in LOGGER.handlers) == 1
+
+def test_plugin_logger_structure_and_levels(caplog):
+    from datetime import datetime
+    from ai_runtime.observability import PluginLogger, relay_plugin_log
+    caplog.set_level(logging.DEBUG, logger='ai_runtime')
+    plugin = PluginLogger('demo')
+    for method, level in [('debug',10),('info',20),('warning',30),('error',40),('critical',50)]:
+        getattr(plugin, method)('业务消息', count=3, token='private')
+        record = caplog.records[-1]
+        assert record.levelno == level
+        entry = record.runtime_log
+        assert entry['plugin'] == 'demo'
+        assert entry['msg'] == '业务消息'
+        assert entry['fields'] == {'count': 3, 'token': '<redacted>'}
+        assert datetime.fromisoformat(entry['time']).tzinfo is not None
+    assert relay_plugin_log({'level': [], 'time': 'bad'}) is None
+    assert relay_plugin_log({'level': 'INFO', 'time': 'bad', 'msg': 'x', 'plugin': 'demo', 'fields': {}}) is None

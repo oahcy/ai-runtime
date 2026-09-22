@@ -122,3 +122,19 @@ new 不覆盖现有目录，不自动注册。缺少依赖时由作者明确安�
 原 examples/neon 与 examples/live-lab 的实现已移动到 plugins/effects，原示例位置保留插件调用说明。
 既有 kernel 不会自动替换已导入的类。新建会话可使用新 SDK；更新守护进程后新增 HTTP 接口才会生效，重新连接 MCP 后才会加载新增6个工具。
 为避免中断运行中的模拟，本次开发不会自动关闭旧服务。
+
+## 插件业务日志
+
+create(context) 收到的 context.logger 已绑定插件 ID。可使用 debug/info/warning/error/critical(msg, **fields)，或 log("INFO", msg, **fields)。msg 为字符串，额外信息通过命名字段传入，不使用 Python logging 的位置参数格式化。
+
+```python
+context.logger.info("连接设备成功", device="emulator-5554")
+context.logger.warning("重试连接", attempt=2)
+context.logger.error("读取失败", error_type="TimeoutError")
+```
+
+日志在发出时保存 UTC ISO 时间，携带 level、msg、plugin、fields；主服务补充 session_id 和 execution_id。通过 IOPub 回传后，以 plugin.log 事件持久化，可用 read_events 获取原始结构；主服务 LogRecord.runtime_log 也保留该字典。终端按实际级别和发出时间显示。DEBUG 默认不显示在 INFO 终端，但仍保存在事件记录中。
+
+普通 print 和第三方 logging 不会自动改走此接口。后台线程可调用 logger，但任务归属取决于 IOPub 的 parent ID：后台消息可能没有 execution_id，或仍关联启动线程的任务；session_id 和插件名始终明确。
+
+密码/token 等命名字段会脱敏，URL fragment 会隐藏；不要把凭证直接拼入 msg。此改动只统一业务日志接口和结构化传输，终端重定向仍为文本，未加入 JSONL 输出模式。

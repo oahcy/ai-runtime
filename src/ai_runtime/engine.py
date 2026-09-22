@@ -11,7 +11,7 @@ from pathlib import Path
 
 from jupyter_client import AsyncKernelManager
 from .store import Store
-from .observability import MIME, log_event, code_summary
+from .observability import MIME, log_event, code_summary, relay_plugin_log
 
 TERMINAL = {'succeeded', 'failed', 'interrupted', 'unknown', 'cancelled'}
 OUTPUT_LIMIT = 4 * 1024 * 1024
@@ -163,6 +163,11 @@ class Runtime:
                 return
         data = content.get('data', {})
         notice = data.get(MIME)
+        if isinstance(notice, dict) and notice.get('event') == 'plugin.log':
+            entry = relay_plugin_log(notice.get('fields'), sid, eid)
+            if entry is not None:
+                self.store.event(sid, eid, 'plugin.log', entry)
+            return
         if isinstance(notice, dict) and str(notice.get('event', '')).startswith('plugin.'):
             fields = notice.get('fields', {})
             if isinstance(fields, dict):

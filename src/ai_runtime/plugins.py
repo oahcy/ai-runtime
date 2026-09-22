@@ -10,10 +10,10 @@ import sys
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
-from .observability import plugin_event
+from .observability import plugin_event, PluginLogger
 
 ID = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -108,6 +108,7 @@ class PluginContext:
     session_id: str
     session_dir: Path
     workdir: Path
+    logger: PluginLogger | None = None
 
 
 class Plugin(Protocol):
@@ -185,7 +186,7 @@ class PluginManager:
         plugin_event('plugin.loading', plugin=plugin_id, version=manifest['version'])
         try:
             spec.loader.exec_module(module)
-            instance = module.create(self.context)
+            instance = module.create(replace(self.context, logger=PluginLogger(plugin_id)))
             if not callable(getattr(instance, 'call', None)) or not callable(getattr(instance, 'close', None)):
                 raise ValueError('Plugin must implement call(action, arguments) and close()')
             handle = PluginHandle(plugin_id, manifest, instance, name)

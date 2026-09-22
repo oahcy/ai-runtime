@@ -104,6 +104,9 @@ async def test_effects_real_preview_and_cleanup(tmp_path):
 
 def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path, caplog):
     folder = Path(scaffold(tmp_path / 'demo', 'demo'))
+    entry = folder / 'plugin.py'
+    source = entry.read_text(encoding='utf-8').replace('        return {"session_id":', '        self.context.logger.warning("business warning", count=7, token="hidden-value")\n        self.context.logger.debug("business debug")\n        return {"session_id":')
+    entry.write_text(source, encoding='utf-8')
     with TestClient(create_app(tmp_path / 'data', 'test-token')) as client:
         assert client.get('/plugins').status_code == 401
         client.headers['Authorization'] = 'Bearer test-token'
@@ -129,6 +132,17 @@ def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path, caplog):
         assert job('call', payload) == eid
         events = client.get(f'/sessions/{sid}/events').json()['events']
         assert any(sid in e['payload'].get('text', '') and '"ok": true' in e['payload'].get('text', '') for e in events)
+        business = [e for e in events if e['kind'] == 'plugin.log']
+        assert len(business) == 2
+        entry = business[0]['payload']
+        assert entry['plugin'] == 'demo' and entry['level'] == 'WARNING'
+        assert entry['msg'] == 'business warning' and entry['session_id'] == sid
+        assert entry['execution_id'] == eid
+        assert entry['fields'] == {'count': 7, 'token': '<redacted>'}
+        assert business[1]['payload']['level'] == 'DEBUG'
+        record = next(r for r in caplog.records if getattr(r, 'runtime_log', {}).get('msg') == 'business warning')
+        assert record.levelno == 30
+        assert record.runtime_log['time'] == entry['time']
         job('unload', {'request_id': 'unload'})
         client.delete('/sessions/'+sid)
         messages = '\n'.join(r.getMessage() for r in caplog.records if r.name == 'ai_runtime')

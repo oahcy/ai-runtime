@@ -25,7 +25,9 @@ class Effects:
                 self.scenes[name] = scene
             elif 'count' in arguments and len(self.scenes[name].points) != arguments['count']:
                 raise ValueError('Stop the scene before changing count')
-            return dict(scene=name, **self.scenes[name].start())
+            result = dict(scene=name, **self.scenes[name].start())
+            self.context.logger.info('效果预览已启动', scene=name)
+            return result
         if action == 'status':
             if arguments: raise ValueError('status takes no arguments')
             return {name: obj.info() for name, obj in self.scenes.items()}
@@ -42,6 +44,7 @@ class Effects:
                 raise ValueError('changes must be an object; message is a separate parameter')
             fn = obj.update if name == 'neon' else obj.configure
             fn(message=arguments.get('message', 'Plugin scene updated'), **changes)
+            self.context.logger.info('效果参数已更新', scene=name, changes=changes)
             return dict(scene=name, **obj.info())
         if action == 'snapshot':
             return obj.snapshot()
