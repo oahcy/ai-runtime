@@ -239,7 +239,9 @@ def test_cdp_script_index_source_stack_and_breakpoints(tmp_path):
                             'scriptId':str(i),'url':f'game/{i}.js','startLine':0,'endLine':10}}))
                     ws.send(json.dumps({'method':'Debugger.paused','params':{'reason':'other','callFrames':[{
                         'callFrameId':'frame1','functionName':'update','url':'game/0.js',
-                        'location':{'scriptId':'0','lineNumber':4,'columnNumber':2}}]}}))
+                        'location':{'scriptId':'0','lineNumber':4,'columnNumber':2},
+                        'this':{'type':'object','objectId':'this1'},
+                        'scopeChain':[{'type':'local','object':{'type':'object','objectId':'scope1'}}]}]}}))
                 elif method == 'Debugger.getScriptSource':
                     result = {'scriptSource':'one\ntwo\nthree\nfour'}
                 elif method == 'Debugger.setBreakpointByUrl':
@@ -266,6 +268,8 @@ def test_cdp_script_index_source_stack_and_breakpoints(tmp_path):
         assert result['source'] == 'two\nthree' and result['has_more']
         stack = cdp.call('stack')
         assert stack['execution'] == 'paused' and stack['pause']['frames'][0]['line'] == 5
+        assert stack['pause']['frames'][0]['scopes'][0]['object']['objectId'] == 'scope1'
+        assert stack['pause']['frames'][0]['this']['objectId'] == 'this1'
         assert cdp.call('breakpoint_set', {'url':'game/0.js','line':5})['breakpointId'] == 'bp1'
         assert commands[-1]['params']['lineNumber'] == 4
         cdp.call('breakpoint_remove', {'breakpoint_id':'bp1'})
@@ -278,3 +282,125 @@ def test_cdp_script_index_source_stack_and_breakpoints(tmp_path):
         assert cdp.call('stack')['execution'] == 'unknown'
     finally:
         m.close();server.shutdown();thread.join(3)
+
+def test_cdp_source_search_and_variable_queries(tmp_path, monkeypatch):
+    m, cdp = loaded(tmp_path, 'chrome-devtools')
+    obj = cdp._instance
+    obj.scripts = {('default','s1'):{'script_id':'s1','url':'app.js'},
+                   ('default','s2'):{'script_id':'s2','url':'lib.js'}}
+    calls = []
+    def command(method, params, seconds, session):
+        calls.append((method, params))
+        if method == 'Debugger.searchInContent':
+            return {'result':[{'lineNumber':9,'lineContent':'needle = 42'},{'lineNumber':10,'lineContent':'needle++'}]}
+        if method == 'Runtime.getProperties':
+            return {'result':[{'name':'x','value':{'type':'number','value':42}},
+                              {'name':'child','value':{'type':'object','objectId':'child1','description':'Object'}},
+                              {'name':'accessor','get':{'type':'function','objectId':'getter1'}}]}
+        if method == 'Debugger.evaluateOnCallFrame':
+            return {'result':{'type':'number','value':42}}
+        return {}
+    monkeypatch.setattr(obj, '_command', command)
+    try:
+        hits = cdp.call('source_search', {'query':'needle','url_query':'app','limit':1})
+        assert hits['matches'][0]['line'] == 10 and hits['truncated']
+        assert calls[-1][1]['isRegex'] is False
+        hits = cdp.call('source_search', {'query':'needle','max_scripts':1})
+        assert hits['has_more'] and hits['next_offset'] == 1
+        props = cdp.call('variables', {'object_id':'scope1','offset':1,'limit':1})
+        assert props['properties'][0]['value']['objectId'] == 'child1'
+        assert props['has_more'] and props['next_offset'] == 2
+        getter = cdp.call('variables', {'object_id':'scope1','offset':2})['properties'][0]
+        assert 'get' in getter and 'value' not in getter
+        cdp.call('frame_evaluate', {'call_frame_id':'f','expression':'x'})
+        assert calls[-1][1]['throwOnSideEffect'] is True
+        cdp.call('frame_evaluate', {'call_frame_id':'f','expression':'x++','allow_side_effects':True})
+        assert calls[-1][1]['throwOnSideEffect'] is False
+        for action, method in [('pause','Debugger.pause'),('step_over','Debugger.stepOver'),
+                               ('step_into','Debugger.stepInto'),('step_out','Debugger.stepOut')]:
+            cdp.call(action)
+            assert calls[-1][0] == method
+        with pytest.raises(ValueError):
+            cdp.call('frame_evaluate', {'call_frame_id':'f','expression':'x','allow_side_effects':1})
+    finally:
+        m.close()
+
+
+def test_event_driven_pause_wait_and_compact_snapshot(tmp_path):
+    import concurrent.futures
+    commands = []
+    def target(ws):
+        try:
+            for raw in ws:
+                req = json.loads(raw)
+                method, result = req['method'], {}
+                commands.append(method)
+                if method == 'Test.hit':
+                    ws.send(json.dumps({'method':'Debugger.paused','params':{
+                        'reason':'other','callFrames':[{'callFrameId':'f','functionName':'calculate',
+                        'location':{'scriptId':'s','lineNumber':3,'columnNumber':0},
+                        'scopeChain':[{'type':'local','object':{'type':'object','objectId':'scope'}}]}]}}))
+                elif method == 'Runtime.getProperties':
+                    result = {'result':[{'name':'bonus','value':{'type':'string','value':'20'}},
+                                        {'name':'nested','value':{'type':'object','objectId':'obj'}},
+                                        {'name':'danger','get':{'type':'function','objectId':'getter'}}]}
+                elif method == 'Debugger.getScriptSource':
+                    result = {'scriptSource':'a\nb\nc\nreturn total;\ne\nf'}
+                elif method == 'Debugger.resume':
+                    ws.send(json.dumps({'method':'Debugger.resumed','params':{}}))
+                ws.send(json.dumps({'id':req['id'],'result':result}))
+        except Exception:
+            pass
+    server = serve(target,'127.0.0.1',0)
+    thread = threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    m, cdp = loaded(tmp_path,'chrome-devtools')
+    pool = concurrent.futures.ThreadPoolExecutor(1)
+    try:
+        cdp.call('connect', {'url':f'ws://127.0.0.1:{server.socket.getsockname()[1]}/test'})
+        future = pool.submit(cdp.call,'wait_for_pause',{'wait_seconds':2,'source_lines':3})
+        time.sleep(.1)
+        assert not future.done() and commands == []  # Waiting issues no polling commands.
+        cdp.call('command', {'method':'Test.hit'})
+        result = future.result(3)
+        assert result['status'] == 'paused' and not result['partial']
+        assert result['variables'][0] == {'name':'bonus','type':'string','value':'20'}
+        assert result['variables'][2]['type'] == 'accessor'
+        assert result['source']['lines'][1]['current'] is True
+        assert commands == ['Test.hit','Runtime.getProperties','Debugger.getScriptSource']
+        pause_id = result['pause_id']
+        assert cdp.call('wait_for_pause', {'wait_seconds':0,'summary':False})['pause_id'] == pause_id
+        assert cdp.call('wait_for_pause', {'after_pause':pause_id,'wait_seconds':.05})['status'] == 'timeout'
+        assert cdp.call('stack')['execution'] == 'paused'  # Timeout never resumes.
+        cdp.call('resume')
+        assert cdp.call('pause_snapshot')['status'] == 'not_paused'
+        future = pool.submit(cdp.call,'wait_for_pause',{'after_pause':pause_id,'wait_seconds':2,'summary':False})
+        cdp.call('command', {'method':'Test.hit'})
+        assert future.result(3)['pause_id'] > pause_id
+        future = pool.submit(cdp.call,'wait_for_pause',{'after_pause':2**62,'wait_seconds':10})
+        time.sleep(.05)
+        cdp.call('disconnect')
+        assert future.result(2)['status'] == 'disconnected'
+        with pytest.raises(ValueError):
+            cdp.call('wait_for_pause', {'wait_seconds':True})
+    finally:
+        m.close();pool.shutdown(wait=True);server.shutdown();thread.join(3)
+
+
+def test_pause_snapshot_detects_resume_during_inspection(tmp_path, monkeypatch):
+    m, cdp = loaded(tmp_path,'chrome-devtools')
+    obj = cdp._instance
+    obj.stacks['default'] = {'pause_id':1,'reason':'other','truncated':False,'frames':[{
+        'call_frame_id':'f','function':'calc','line':1,'column':1,'script_id':'s','url':'test.js',
+        'scopes':[{'type':'local','object':{'objectId':'scope'}}]}]}
+    calls=[]
+    def command(method, params, seconds, session):
+        calls.append(method)
+        with obj.lock: obj.stacks.clear()
+        return {'result':[{'name':'stale','value':{'type':'number','value':1}}]}
+    monkeypatch.setattr(obj,'_command',command)
+    try:
+        result = cdp.call('pause_snapshot')
+        assert result['status'] == 'state_changed' and 'variables' not in result
+        assert calls == ['Runtime.getProperties']
+    finally:
+        m.close()

@@ -1,6 +1,7 @@
 """Persistent loopback Chrome DevTools Protocol client."""
 import base64
-from .queries import PARAMETERS, query
+from .queries import PARAMETERS, query, remote_summary
+from .inspection import PARAMETERS as INSPECTION_PARAMETERS, inspect as inspect_pause
 from collections import deque
 import inspect
 import json
@@ -47,6 +48,7 @@ class DevTools:
         self._socket_resource = None
         self._reader_resource = None
         self.lock = threading.Lock()
+        self.changed = threading.Condition(self.lock)
         self.send_lock = threading.Lock()
         self.pending = {}
         self.event_buffer = deque(maxlen=200)
@@ -169,11 +171,14 @@ class DevTools:
                             self.protocol.pop(key, None)
                         if method == 'Debugger.paused':
                             frames = params.get('callFrames', [])
-                            self.stacks[key] = {'reason': params.get('reason'),
+                            self.stacks[key] = {'pause_id': self.sequence + 1, 'reason': params.get('reason'),
                                 'frames': [{'call_frame_id': f.get('callFrameId'), 'function': f.get('functionName', '')[:512],
-                                            'url': f.get('url', '')[:4096], 'script_id': f.get('location', {}).get('scriptId'),
+                                            'url': (f.get('url') or self.scripts.get((key, f.get('location', {}).get('scriptId')), {}).get('url', ''))[:4096], 'script_id': f.get('location', {}).get('scriptId'),
                                             'line': f.get('location', {}).get('lineNumber', 0)+1,
-                                            'column': f.get('location', {}).get('columnNumber', 0)+1} for f in frames[:100]],
+                                            'column': f.get('location', {}).get('columnNumber', 0)+1,
+                                            'this': remote_summary(f.get('this')),
+                                            'scopes': [{'type': scope.get('type'), 'name': scope.get('name', '')[:512],
+                                                        'object': remote_summary(scope.get('object'))} for scope in f.get('scopeChain', [])[:30]]} for f in frames[:100]],
                                 'truncated': len(frames) > 100}
                             self.protocol[key] = 'paused'
                         elif method == 'Debugger.resumed':
@@ -184,6 +189,7 @@ class DevTools:
                         if len(raw) > 32768:
                             message = {'method': message['method'], 'truncated': True, 'original_bytes': len(raw)}
                         self.event_buffer.append({'seq': self.sequence, **message})
+                        self.changed.notify_all()
         except Exception as exc:
             error = type(exc).__name__ + ': debugger connection ended'
         finally:
@@ -203,6 +209,7 @@ class DevTools:
                         'code': getattr(ws, 'close_code', None),
                         'reason': str(getattr(ws, 'close_reason', '') or '')[:300],
                     }
+                self.changed.notify_all()
                 for waiter in self.pending.values():
                     if not waiter['done'].is_set():
                         entry = next((x for x in self.history if x['outcome'] == 'pending' and self.pending.get(x['id']) is waiter), None)
@@ -272,7 +279,10 @@ class DevTools:
             'status': set(), 'disconnect': set()
         }
         allowed.update(PARAMETERS)
+        allowed.update(INSPECTION_PARAMETERS)
         if action not in allowed or set(a) - allowed[action]: raise ValueError('Unknown action or parameters')
+        if action in INSPECTION_PARAMETERS:
+            return inspect_pause(self, action, a)
         if action in PARAMETERS:
             return query(self, action, a)
         if action == 'prepare':

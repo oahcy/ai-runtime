@@ -1,7 +1,7 @@
 {
   "id": "chrome-devtools",
   "name": "Chrome DevTools 调试",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "api_version": 1,
   "description": "持久 CDP 连接、表达式执行、事件游标和截图；支持本机 Chrome 或兼容 V8 调试端口。",
   "entry": "plugin.py",
@@ -120,6 +120,91 @@
       "parameters": {
         "timeout": "seconds",
         "session_id": "optional"
+      }
+    },
+    "source_search": {
+      "description": "Literal search in loaded JavaScript source with total time budget",
+      "parameters": {
+        "query": "required literal text",
+        "script_id": "optional single script",
+        "url_query": "optional URL filter",
+        "offset": "script offset default 0",
+        "max_scripts": "1..100 default 20",
+        "limit": "match limit 1..500 default 100",
+        "case_sensitive": "boolean default false",
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "variables": {
+      "description": "Read own properties without invoking getters; expand nested objectId separately",
+      "parameters": {
+        "object_id": "required from stack scope/this/value",
+        "offset": "default 0",
+        "limit": "1..200 default 50",
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "frame_evaluate": {
+      "description": "Evaluate in a paused frame; throws on potential side effects by default",
+      "parameters": {
+        "call_frame_id": "required from stack",
+        "expression": "required",
+        "allow_side_effects": "boolean default false; explicitly true permits mutation",
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "pause": {
+      "description": "Request a JavaScript pause",
+      "parameters": {
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "step_over": {
+      "description": "Step over while paused",
+      "parameters": {
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "step_into": {
+      "description": "Step into while paused",
+      "parameters": {
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "step_out": {
+      "description": "Step out while paused",
+      "parameters": {
+        "timeout": "seconds",
+        "session_id": "optional CDP session"
+      }
+    },
+    "pause_snapshot": {
+      "description": "Read a compact paused stack, top-frame locals and source; never evaluates getters or resumes",
+      "parameters": {
+        "session_id": "optional CDP session",
+        "timeout": "inspection total seconds default 3",
+        "frame_limit": "1..20 default 5",
+        "variable_limit": "0..50 default 12; top local scope only",
+        "source_lines": "0..31 default 7"
+      }
+    },
+    "wait_for_pause": {
+      "description": "Wait on debugger events, no polling; returns paused/timeout/disconnected/state_changed. Timeout does not cancel or resume target.",
+      "parameters": {
+        "session_id": "optional CDP session",
+        "timeout": "inspection total seconds default 3",
+        "frame_limit": "1..20 default 5",
+        "variable_limit": "0..50 default 12; top local scope only",
+        "source_lines": "0..31 default 7",
+        "wait_seconds": "0..20 default5; inspection has separate timeout",
+        "after_pause": "return only a newer pause_id, default0 includes current pause",
+        "summary": "boolean default true; include compact snapshot"
       }
     }
   }

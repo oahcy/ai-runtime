@@ -119,3 +119,40 @@ action="stack", arguments={}
 
 更新已注册插件：python -m ai_runtime.plugins refresh chrome-devtools。
 已有会话需 unload/load 才会载入新版；这会关闭旧调试连接。也可在主服务重启后新建会话加载。
+
+## 0.4 完整 JS 调试流程
+
+1. scripts 查找文件，再 source_search 搜索源码内容。query 为字面量，不按正则执行；可用 script_id 限定文件或 url_query 筛选已加载文件。offset/max_scripts 按脚本分页，limit 限制命中数量。超时或错误会在 errors 中报告；truncated 时需缩小范围，不能认为已经返回全部命中。
+2. source 读取指定行附近的源码，breakpoint_set 设置断点。
+3. 命中后 stack 返回函数、文件、行列、call_frame_id、this 和 scopes。栈中的行列从 1 开始；目标未提供 URL 时用脚本索引补全。
+4. variables(object_id=scope.object.objectId) 查看局部变量、闭包变量或对象自己的属性。通过 value.objectId 继续展开嵌套对象，offset/limit 分页；getter 仅展示描述符，不主动执行。长字符串显示前 2000 字符。
+5. frame_evaluate(call_frame_id=..., expression=...) 在选中帧求值，默认 throwOnSideEffect=true。若目标不支持或表达式可能有副作用，会报错，不自动退回不受限求值；确需修改时显式传 allow_side_effects=true。异常见 exceptionDetails，返回对象可用 variables 展开。
+6. step_over / step_into / step_out 实现单步；pause 主动请求暂停，resume 继续运行。步骤命令的响应不等于已经收到新的暂停事件，随后读取 stack 确认；最后 breakpoint_remove 清理测试断点。
+
+object_id / call_frame_id 属于当前目标和暂停现场，恢复、导航或重连后应重新获取，不持久复用。
+搜索和行断点针对目标已加载的生成 JavaScript，暂未实现 source map 映射回 TypeScript。
+搜索和属性读取底层仍可能返回完整 CDP 响应，受现有 8 MiB 消息上限约束，分页限制的是返回给调用方的结果。
+
+在 Windows 原生 Cocos 游戏实测：assets/main/index.js 第 664 行命中 FriendsUI._buildUI；
+调用栈包含 _buildUI → start → 引擎调度，局部变量 root=Node、lt=UITransform、backBtn=undefined；
+帧求值 typeof root 返回 object；step_over 后停在 665 行；删除断点并 resume 成功。
+
+## 0.5 事件等待与暂停摘要
+
+wait_for_pause 使用接收线程的条件通知等待 Debugger.paused，不反复发送 stack 查询。
+默认 wait_seconds=5（0–20），summary=true；已暂停则立即返回，after_pause 可指定上次的 pause_id，仅等待更新现场。
+返回 status 为 paused、timeout、disconnected 或 state_changed。等待超时不取消目标执行、不清理断点、不自动恢复。
+每次连接和 CDP 子会话的现场分开处理；连接断开会立即唤醒等待者。pause_id 在插件实例内单调递增，重新加载实例后须重置游标。
+
+pause_snapshot 直接读取当前暂停现场。两种动作的摘要默认前 5 层调用栈、栈顶局部作用域的 12 个变量和附近 7 行源码。
+frame_limit=1–20、variable_limit=0–50、source_lines=0–31；0 可关闭变量或源码读取。
+字符串最多 200 字符，源码每行最多 300 字符，明确标记截断；复杂对象仅保留 objectId 供 variables 按需展开，不调用 getter，不求值。
+timeout 默认 3 秒，是摘要查询共享的总预算；超时或部分失败保留其他信息，并返回 partial/errors。
+检查期间若现场已恢复、重新暂停或断开，返回 state_changed，避免将旧变量当作当前现场。
+
+通过 call_plugin_and_wait 调用 action="wait_for_pause" 即可等待并拿到摘要。
+注意 MCP wait_seconds（等待 Python 任务）与 arguments.wait_seconds（等待断点）是两层预算；
+外层 timeout 应大于断点等待加摘要预算。例如 timeout=30，arguments={"wait_seconds":15,"timeout":3}。
+若快捷调用先返回 done=false，使用 read_execution_result 续读，不重新下发等待任务。
+一次会话按顺序执行任务：目标操作应先触发，或由游戏自身运行/用户操作触发，再等待断点；不要在同一 Kernel 中把触发任务排到正在等待的任务后面。
+step_over 后传上次 pause_id 等待，防止读到单步前的缓存。

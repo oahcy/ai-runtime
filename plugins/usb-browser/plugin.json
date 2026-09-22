@@ -1,0 +1,59 @@
+{
+  "id": "usb-browser",
+  "name": "USB 手机浏览器调试",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "通过 ADB 发现 Android 浏览器、转发端口、选择页面并使用 CDP 调试。",
+  "entry": "plugin.py",
+  "actions": {
+    "configure": {
+      "description": "Configure ADB executable and default device",
+      "parameters": {
+        "adb_path": "optional absolute executable path",
+        "serial": "optional device serial"
+      }
+    },
+    "devices": {
+      "description": "List devices and authorization state",
+      "parameters": {}
+    },
+    "browsers": {
+      "description": "Discover Chrome, Chromium and debugging-enabled WebView sockets",
+      "parameters": {
+        "serial": "optional; required when multiple devices"
+      }
+    },
+    "open": {
+      "description": "Create an owned dynamic ADB forward and list browser pages",
+      "parameters": {
+        "serial": "optional device serial",
+        "socket": "socket from browsers; optional when exactly one"
+      }
+    },
+    "targets": {
+      "description": "Refresh pages through current forward",
+      "parameters": {}
+    },
+    "connect": {
+      "description": "Connect page and enable Runtime/Debugger without resuming paused code",
+      "parameters": {
+        "target_id": "page id; optional when exactly one"
+      }
+    },
+    "cdp": {
+      "description": "Run existing chrome-devtools action: evaluate, screenshot, command, scripts, source_search, breakpoint_set, wait_for_pause, etc.",
+      "parameters": {
+        "action": "chrome-devtools action",
+        "arguments": "action parameters object"
+      }
+    },
+    "status": {
+      "description": "Read owned forward and debugger status",
+      "parameters": {}
+    },
+    "disconnect": {
+      "description": "Close debugger and remove only owned matching forward",
+      "parameters": {}
+    }
+  }
+}
