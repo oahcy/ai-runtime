@@ -12,7 +12,8 @@ ai-runtime/
   plugins/effects/     效果测试插件：霓虹 + 风洞
   plugins/chrome-devtools/  CDP 调试插件
   plugins/adb/         Android 设备工具
-  examples/            使用插件的简短脚本
+  plugins/*/examples/  插件调用与组合排查脚本
+  examples/            仅保留 Runtime 核心能力示例
   tests/               Runtime 与插件测试
 ```
 
@@ -121,7 +122,7 @@ new 不覆盖现有目录，不自动注册。缺少依赖时由作者明确安�
 
 ## 从旧版迁移
 
-原 examples/neon 与 examples/live-lab 的实现已移动到 plugins/effects，原示例位置保留插件调用说明。
+效果实现与调用示例统一放在 plugins/effects；旧迁移占位目录已删除。根目录 examples 仅演示 Runtime 核心能力。
 既有 kernel 不会自动替换已导入的类。新建会话可使用新 SDK；更新守护进程后新增 HTTP 接口才会生效，重新连接 MCP 后才会加载新增6个工具。
 为避免中断运行中的模拟，本次开发不会自动关闭旧服务。
 

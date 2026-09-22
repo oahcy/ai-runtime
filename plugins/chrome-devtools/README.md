@@ -82,3 +82,16 @@ prepare 使用一个总时间预算，按顺序执行可选 runIfWaitingForDebug
 .\.venv\Scripts\python.exe -m ai_runtime.plugins refresh chrome-devtools
 ~~~
 已加载旧版本的会话先 unload 再 load；此操作关闭该会话的调试连接。
+
+
+## 组合排查示例
+
+[examples/diagnose_app.py](examples/diagnose_app.py) 将 ADB 启动日志与 DevTools 探测组合起来，需同时注册 adb 插件。在项目根目录对应的 Runtime kernel 中：
+
+~~~python
+import runpy
+diagnose_app = runpy.run_path("plugins/chrome-devtools/examples/diagnose_app.py")["diagnose_app"]
+report = diagnose_app(runtime, "你的应用包名", "ws://127.0.0.1:5086/目标ID")
+~~~
+
+已知应用等待调试器、且希望它继续启动时，传 release_wait=True。

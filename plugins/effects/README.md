@@ -18,3 +18,5 @@ status 返回各场景 URL；snapshot 返回完整状态（风洞含所有粒子
 unload effects 会关闭两个场景。网页自身的暂停/冻结按钮只暂停本地观察，风洞 Python 是否暂停由 paused 决定。
 
 本插件是效果与功能验证示例，风洞不是工程 CFD 求解器。
+
+调用示例：[examples/basic.py](examples/basic.py)，在 Runtime kernel 中执行其内容。

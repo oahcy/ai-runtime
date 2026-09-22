@@ -68,6 +68,6 @@ print(report)
 
 摘要过滤常见凭证字段、HTTP 客户端日志、解密响应行，去掉 URL 查询/片段。它是尽力脱敏，不是任意日志的秘密检测器；原始 run/logcat 不做此过滤。进程不存在或历史日志被覆盖时，报告不会猜测原因，也不会自动唤醒、启动或重启应用。多进程应用只覆盖 pidof 精确包名返回的进程，可能不包含带冒号的子进程。
 
-发现资源下载 Not Found 会给出部署路径检查提示，不断言是唯一根因。组合排查见 [diagnose_app.py](../../examples/diagnose_app.py)：先收集 ADB 证据，再限时探测 CDP，无响应时仍返回设备报告。
+发现资源下载 Not Found 会给出部署路径检查提示，不断言是唯一根因。组合排查见 [diagnose_app.py](../chrome-devtools/examples/diagnose_app.py)：先收集 ADB 证据，再限时探测 CDP，无响应时仍返回设备报告。
 
 旧安装执行 python -m ai_runtime.plugins refresh adb，已有会话 unload/load 后使用新动作。
