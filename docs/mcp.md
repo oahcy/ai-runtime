@@ -104,3 +104,24 @@ MCP 集成测试会启动独立 HTTP 服务和真实 STDIO Adapter，通过官�
 - WebSocket 仍是 Runtime API 能力；MCP 层目前按游标读取事件，没有向闲置模型主动推送唤醒事件。
 
 插件接口加入后共有18个 MCP 工具；新增工具需在重启服务并重新连接 MCP 后使用。
+
+## 短任务快捷调用
+
+优先使用 execute_and_wait(session_id, request_id, code) 或
+call_plugin_and_wait(session_id, plugin_id, request_id, action, arguments)。
+默认最多等待 5 秒（wait_seconds 可设 0–20）；timeout 仍是执行超时，等待结束不会取消任务。
+原 execute / call_plugin 保留只入队行为。
+
+返回 execution_id、session_id、status、reason、done、outputs、cursor、has_more。
+outputs 只包含该任务的 output.* 和 artifact.created，不混入其他执行或无归属后台事件；
+Python print 的结果在 output.stream.payload.text，插件返回值是 stdout 中的 JSON。
+done 表示任务终结，不代表成功，需检查 status 是否 succeeded；JS evaluate 还需检查 exceptionDetails。
+
+done=false 时，用 read_execution_result(execution_id, wait_seconds=5, after=cursor) 续读；
+has_more=true 时同样携带 cursor 分页读取，直到没有剩余事件。默认每页扫描 100 条任务事件，上限 200。
+无归属后台输出仍从 read_events 读取。历史结果读取不会重新执行。
+网络结果不确定时沿用完全相同的 request_id 和执行参数；不要换 ID 重发。
+提交成功但取结果失败时，工具错误会保留 execution_id，直接按 ID 查询。
+
+HTTP 对应 GET /executions/{eid}/result，支持 wait_seconds、after、limit，需 Bearer 授权。
+升级后重启主服务并重新连接 MCP，才能加载三个新增工具；旧工具继续兼容。

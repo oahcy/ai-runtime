@@ -223,3 +223,58 @@ def test_adb_diagnose_filters_secrets_and_retains_partial_report(tmp_path,monkey
         with pytest.raises(ValueError):
             adb.call('diagnose',{'package':'test.app; rm'})
     finally: m.close()
+
+
+def test_cdp_script_index_source_stack_and_breakpoints(tmp_path):
+    commands = []
+    def target(ws):
+        try:
+            for raw in ws:
+                req = json.loads(raw)
+                commands.append(req)
+                method, result = req['method'], {}
+                if method == 'Debugger.enable':
+                    for i in range(230):
+                        ws.send(json.dumps({'method':'Debugger.scriptParsed','params':{
+                            'scriptId':str(i),'url':f'game/{i}.js','startLine':0,'endLine':10}}))
+                    ws.send(json.dumps({'method':'Debugger.paused','params':{'reason':'other','callFrames':[{
+                        'callFrameId':'frame1','functionName':'update','url':'game/0.js',
+                        'location':{'scriptId':'0','lineNumber':4,'columnNumber':2}}]}}))
+                elif method == 'Debugger.getScriptSource':
+                    result = {'scriptSource':'one\ntwo\nthree\nfour'}
+                elif method == 'Debugger.setBreakpointByUrl':
+                    result = {'breakpointId':'bp1','locations':[]}
+                elif method == 'Debugger.resume':
+                    ws.send(json.dumps({'method':'Debugger.resumed','params':{}}))
+                ws.send(json.dumps({'id':req['id'],'result':result}))
+        except Exception:
+            pass
+    server = serve(target,'127.0.0.1',0)
+    thread = threading.Thread(target=server.serve_forever,daemon=True)
+    thread.start()
+    m, cdp = loaded(tmp_path,'chrome-devtools')
+    url = f'ws://127.0.0.1:{server.socket.getsockname()[1]}/test'
+    try:
+        cdp.call('connect', {'url':url})
+        cdp.call('command', {'method':'Debugger.enable'})
+        assert cdp.call('events')['dropped']
+        scripts = cdp.call('scripts', {'query':'game/0.js'})
+        assert scripts['scripts'][0]['script_id'] == '0'
+        assert cdp.call('scripts', {'limit':200})['has_more']
+        assert cdp.call('scripts', {'session_id':'other'})['scripts'] == []
+        result = cdp.call('source', {'script_id':'0','start_line':2,'line_count':2})
+        assert result['source'] == 'two\nthree' and result['has_more']
+        stack = cdp.call('stack')
+        assert stack['execution'] == 'paused' and stack['pause']['frames'][0]['line'] == 5
+        assert cdp.call('breakpoint_set', {'url':'game/0.js','line':5})['breakpointId'] == 'bp1'
+        assert commands[-1]['params']['lineNumber'] == 4
+        cdp.call('breakpoint_remove', {'breakpoint_id':'bp1'})
+        cdp.call('resume')
+        assert cdp.call('stack')['pause'] is None
+        with pytest.raises(ValueError):
+            cdp.call('source', {'script_id':'0','start_line':0})
+        cdp.call('connect', {'url':url})
+        assert cdp.call('scripts')['scripts'] == []
+        assert cdp.call('stack')['execution'] == 'unknown'
+    finally:
+        m.close();server.shutdown();thread.join(3)

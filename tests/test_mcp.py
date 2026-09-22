@@ -47,7 +47,7 @@ async def test_bridge_auth_error_and_image(tmp_path):
     assert result.content[0].data == PNG
     server = create_server(bridge)
     tools = await server.list_tools()
-    assert len(tools) == 18
+    assert len(tools) == 21
     by_name = {tool.name: tool for tool in tools}
     assert by_name['execute'].annotations.readOnlyHint is False
     assert by_name['read_artifact'].annotations.readOnlyHint is True
@@ -99,7 +99,7 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
         async with stdio_client(parameters) as (reader, writer):
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
-                assert len((await client.list_tools()).tools) == 18
+                assert len((await client.list_tools()).tools) == 21
                 plugin_dir = scaffold(tmp_path / 'mcp-plugin', 'mcp-test')
                 unpack(await client.call_tool('add_plugin', {'path': plugin_dir}))
                 assert unpack(await client.call_tool('get_plugin', {'plugin_id': 'mcp-test'}))['id'] == 'mcp-test'
@@ -107,6 +107,28 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
                 sid = unpack(await client.call_tool('create_session', {'cwd': str(tmp_path)}))['id']
                 plugin_job = unpack(await client.call_tool('call_plugin', {'session_id': sid, 'plugin_id': 'mcp-test', 'request_id': 'plugin-ping', 'action': 'ping', 'arguments': {}}))
                 assert unpack(await client.call_tool('wait_execution', {'execution_id': plugin_job['id']}))['status'] == 'succeeded'
+                quick_args = {'session_id':sid,'request_id':'quick','code':"counter=globals().get('counter',0)+1\nprint(counter)",'wait_seconds':5}
+                quick = unpack(await client.call_tool('execute_and_wait', quick_args))
+                assert quick['done'] and quick['status'] == 'succeeded'
+                assert any(e['payload'].get('text','').strip() == '1' for e in quick['outputs'])
+                retry = unpack(await client.call_tool('execute_and_wait', quick_args))
+                assert retry['execution_id'] == quick['execution_id']
+                assert retry['outputs'] == quick['outputs']
+                slow = unpack(await client.call_tool('execute_and_wait', {'session_id':sid,'request_id':'slow','code':"import time\ntime.sleep(.5)\nprint('slow-only')",'wait_seconds':0}))
+                assert not slow['done']
+                complete = unpack(await client.call_tool('read_execution_result', {'execution_id':slow['execution_id'],'wait_seconds':5,'limit':1}))
+                assert complete['done'] and complete['has_more']
+                outputs = list(complete['outputs'])
+                while complete['has_more']:
+                    complete = unpack(await client.call_tool('read_execution_result', {'execution_id':slow['execution_id'],'after':complete['cursor'],'limit':1}))
+                    outputs.extend(complete['outputs'])
+                assert all(e['execution_id'] == slow['execution_id'] for e in outputs)
+                assert any('slow-only' in e['payload'].get('text','') for e in outputs)
+                failed = unpack(await client.call_tool('execute_and_wait', {'session_id':sid,'request_id':'fail','code':"raise ValueError('test failure')"}))
+                assert failed['status'] == 'failed' and any(e['kind']=='output.error' for e in failed['outputs'])
+                called = unpack(await client.call_tool('call_plugin_and_wait', {'session_id':sid,'plugin_id':'mcp-test','request_id':'quick-plugin','action':'ping','arguments':{}}))
+                assert called['done'] and called['status'] == 'succeeded'
+                assert called['outputs']
                 job = unpack(await client.call_tool('execute', {'session_id': sid, 'request_id': 'first', 'code': 'answer = 40'}))
                 assert unpack(await client.call_tool('wait_execution', {'execution_id': job['id']}))['status'] == 'succeeded'
         # A new MCP process must reuse daemon-owned state rather than create another kernel.
@@ -133,3 +155,18 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
         server.should_exit = True
         await asyncio.wait_for(task, 20)
         sock.close()
+
+async def test_fast_result_failure_preserves_accepted_job_id(tmp_path):
+    token = tmp_path / 'token'
+    token.write_text('secret')
+    requests = []
+    eid = 'a' * 32
+    def handler(request):
+        requests.append(request.method)
+        if request.method == 'POST':
+            return httpx.Response(202, json={'id': eid})
+        raise httpx.ReadTimeout('unavailable', request=request)
+    server = create_server(Bridge('http://127.0.0.1:8765', token, httpx.MockTransport(handler)))
+    with pytest.raises(ToolError, match=eid):
+        await server.call_tool('execute_and_wait', {'session_id':'b'*32,'request_id':'one','code':'print(1)'})
+    assert requests == ['POST', 'GET']

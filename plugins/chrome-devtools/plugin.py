@@ -1,5 +1,6 @@
 """Persistent loopback Chrome DevTools Protocol client."""
 import base64
+from .queries import PARAMETERS, query
 from collections import deque
 import inspect
 import json
@@ -56,6 +57,9 @@ class DevTools:
         self.last_disconnect = None
         self.activity = {}
         self.protocol = {}
+        self.scripts = {}
+        self.scripts_truncated = False
+        self.stacks = {}
         self.history = deque(maxlen=50)
         self.response_count = 0
         self.timed_out = 0
@@ -148,9 +152,32 @@ class DevTools:
                     elif 'method' in message:
                         key = message.get('sessionId', 'default')
                         method = message['method']
+                        params = message.get('params', {})
+                        if method == 'Debugger.scriptParsed':
+                            script_id = params.get('scriptId')
+                            if script_id is not None:
+                                self.scripts[(key, script_id)] = {
+                                    'script_id': script_id, 'url': params.get('url', '')[:4096],
+                                    'start_line': params.get('startLine', 0)+1,
+                                    'end_line': params.get('endLine', 0)+1}
+                                if len(self.scripts) > 4000:
+                                    self.scripts.pop(next(iter(self.scripts)))
+                                    self.scripts_truncated = True
+                        elif method == 'Runtime.executionContextsCleared':
+                            self.scripts = {k:v for k,v in self.scripts.items() if k[0] != key}
+                            self.stacks.pop(key, None)
+                            self.protocol.pop(key, None)
                         if method == 'Debugger.paused':
+                            frames = params.get('callFrames', [])
+                            self.stacks[key] = {'reason': params.get('reason'),
+                                'frames': [{'call_frame_id': f.get('callFrameId'), 'function': f.get('functionName', '')[:512],
+                                            'url': f.get('url', '')[:4096], 'script_id': f.get('location', {}).get('scriptId'),
+                                            'line': f.get('location', {}).get('lineNumber', 0)+1,
+                                            'column': f.get('location', {}).get('columnNumber', 0)+1} for f in frames[:100]],
+                                'truncated': len(frames) > 100}
                             self.protocol[key] = 'paused'
                         elif method == 'Debugger.resumed':
+                            self.stacks.pop(key, None)
                             self.protocol[key] = 'running'
                         self.activity['last_event'] = method
                         self.sequence += 1
@@ -167,6 +194,9 @@ class DevTools:
             with self.lock:
                 if self.ws is ws:
                     self.ws = None
+                    self.scripts.clear()
+                    self.stacks.clear()
+                    self.protocol.clear()
                     self.last_error = error
                     self.last_disconnect = {
                         'time': self._now(), 'error': error,
@@ -241,7 +271,10 @@ class DevTools:
             'events': {'after', 'limit'}, 'screenshot': {'timeout', 'session_id'},
             'status': set(), 'disconnect': set()
         }
+        allowed.update(PARAMETERS)
         if action not in allowed or set(a) - allowed[action]: raise ValueError('Unknown action or parameters')
+        if action in PARAMETERS:
+            return query(self, action, a)
         if action == 'prepare':
             return self._prepare(a)
         if action == 'targets':
@@ -280,6 +313,9 @@ class DevTools:
                 self.event_buffer.clear()
                 start_cursor = self.sequence
                 self.protocol.clear()
+                self.scripts.clear()
+                self.stacks.clear()
+                self.scripts_truncated = False
                 self.activity.clear()
                 self.history.clear()
                 self.response_count = self.timed_out = self.late_responses = 0

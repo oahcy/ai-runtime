@@ -95,3 +95,27 @@ report = diagnose_app(runtime, "你的应用包名", "ws://127.0.0.1:5086/目标
 ~~~
 
 已知应用等待调试器、且希望它继续启动时，传 release_wait=True。
+
+## 0.3 JS 调试快捷操作
+
+先 connect，再 prepare（或显式 Debugger.enable）以收集脚本事件。
+已知目标等待启动时才使用 release_wait=true；不会自动解除断点暂停。
+
+- scripts：query 按 URL 子串搜索（忽略大小写），offset/limit 分页。独立缓存最近最多 4000 个脚本，不受 200 条事件缓冲限制；cache_truncated 表示发生过淘汰。
+- source：script_id、start_line（从 1 开始）、line_count（默认 80，上限 300）。输出最多 65536 字符，truncated 表示字符截断；源码请求本身仍受现有 CDP 消息大小限制。
+- stack：返回最近观察到的暂停原因和最多 100 个帧，不主动暂停。运行中或未观察到暂停时 pause=null，不能把 unknown 当成 running。
+- breakpoint_set：url 为脚本精确 URL，line、column 从 1 开始，支持 condition。返回 CDP 原始 breakpointId/locations（原始 locations 使用零基行列），locations 为空可能表示尚未绑定。
+- breakpoint_remove：传 breakpoint_id 显式删除。
+- resume：明确恢复 JS 执行。断点命中后不会自动恢复。
+
+以上操作可传 session_id（CDP 子会话 ID，不是 ai-runtime 会话 ID）；需要发协议命令的操作可设 timeout。
+脚本索引按 CDP 会话区分，执行上下文全部清空、连接断开或重连会清理相关缓存。
+设置断点、条件表达式和 resume 会影响调试目标，按需显式调用。低层 command/evaluate/events 保留。
+
+示例（使用 MCP 的 call_plugin_and_wait，plugin_id="chrome-devtools"）：
+action="scripts", arguments={"query":"assets/main"}
+action="source", arguments={"script_id":"23","start_line":1,"line_count":60}
+action="stack", arguments={}
+
+更新已注册插件：python -m ai_runtime.plugins refresh chrome-devtools。
+已有会话需 unload/load 才会载入新版；这会关闭旧调试连接。也可在主服务重启后新建会话加载。

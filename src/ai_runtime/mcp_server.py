@@ -88,7 +88,7 @@ def create_server(bridge: Bridge):
         'Execute Python in persistent local IPython sessions. This is trusted local execution, not a sandbox. '
         'Reuse session_id to preserve memory; client/MCP disconnect does not close the session. '
         'Use a stable unique request_id per logical execute request; uncertain retries must reuse identical arguments. '
-        'execute returns a job ID, not its output. Use wait_execution/get_execution and read_events, then read_artifact for images. '
+        'Prefer execute_and_wait or call_plugin_and_wait for short operations: they return execution-scoped outputs, or a running job ID. Use read_execution_result to continue without resubmitting. execute remains queue-only. Read images with read_artifact. '
         'Never automatically replay unknown executions or restart kernels: inspect external effects first. '
         'Restart discards all Python memory; checkpoints only store explicit JSON. '
         'Use list_plugins/get_plugin to discover local plugins; add_plugin registers a trusted local directory. Plugin load/call/unload run as queued kernel jobs. Use normal Python libraries and the preloaded runtime SDK.'
@@ -119,6 +119,41 @@ def create_server(bridge: Bridge):
         """Queue Python code. Reuse request_id ONLY for identical retries; timeout is kernel execution seconds. Returns execution ID."""
         return await bridge.request('POST', f'/sessions/{session_id}/executions',
                                     {'request_id': request_id, 'code': code, 'timeout': timeout})
+
+    @server.tool(annotations=READ)
+    async def read_execution_result(execution_id: Identifier,
+                                    wait_seconds: Annotated[float, Field(ge=0, le=20)] = 0,
+                                    after: Annotated[int, Field(ge=0)] = 0,
+                                    limit: Annotated[int, Field(ge=1, le=200)] = 100) -> dict:
+        """Read only this job's outputs and status. Save cursor; follow has_more. Waiting never cancels execution."""
+        return await bridge.request('GET', f'/executions/{execution_id}/result?wait_seconds={wait_seconds}&after={after}&limit={limit}')
+
+    async def finish_short_job(job, wait_seconds):
+        try:
+            return await read_execution_result(job['id'], wait_seconds)
+        except ToolError as exc:
+            raise ToolError(f"Job {job['id']} was accepted. Read its result; do not resubmit under a new request_id. {exc}") from None
+
+    @server.tool(annotations=WRITE)
+    async def execute_and_wait(session_id: Identifier,
+                               request_id: Annotated[str, Field(min_length=1, max_length=128)],
+                               code: Annotated[str, Field(min_length=1, max_length=262144)],
+                               timeout: Annotated[float, Field(ge=.1, le=3600)] = 30,
+                               wait_seconds: Annotated[float, Field(ge=0, le=20)] = 5) -> dict:
+        """Execute once, briefly wait, return job status and outputs. If done=false, continue read_execution_result. Identical retries reuse request_id."""
+        job = await execute(session_id, request_id, code, timeout)
+        return await finish_short_job(job, wait_seconds)
+
+    @server.tool(annotations=WRITE)
+    async def call_plugin_and_wait(session_id: Identifier,
+                                   plugin_id: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')],
+                                   request_id: Annotated[str, Field(min_length=1, max_length=128)],
+                                   action: str, arguments: dict,
+                                   timeout: Annotated[float, Field(ge=.1, le=3600)] = 30,
+                                   wait_seconds: Annotated[float, Field(ge=0, le=20)] = 5) -> dict:
+        """Call a plugin once and return job status and outputs. Plugin result is JSON stdout. Waiting does not cancel or replay the action."""
+        job = await call_plugin(session_id, plugin_id, request_id, action, arguments, timeout)
+        return await finish_short_job(job, wait_seconds)
 
     @server.tool(annotations=READ)
     async def get_execution(execution_id: Identifier) -> dict:

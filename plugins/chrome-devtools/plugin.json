@@ -1,7 +1,7 @@
 {
   "id": "chrome-devtools",
   "name": "Chrome DevTools 调试",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "api_version": 1,
   "description": "持久 CDP 连接、表达式执行、事件游标和截图；支持本机 Chrome 或兼容 V8 调试端口。",
   "entry": "plugin.py",
@@ -69,6 +69,57 @@
         "release_wait": "boolean default false; true explicitly sends runIfWaitingForDebugger and may start application",
         "timeout": "total budget seconds, default 6",
         "session_id": "optional flattened CDP session ID"
+      }
+    },
+    "scripts": {
+      "description": "Search cached script URLs after prepare/Debugger.enable; no source execution",
+      "parameters": {
+        "query": "case-insensitive URL substring",
+        "offset": "default 0",
+        "limit": "1..200 default 50",
+        "session_id": "optional CDP session"
+      }
+    },
+    "source": {
+      "description": "Read a bounded source excerpt",
+      "parameters": {
+        "script_id": "required",
+        "start_line": "one-based, default 1",
+        "line_count": "1..300 default 80",
+        "timeout": "seconds",
+        "session_id": "optional"
+      }
+    },
+    "stack": {
+      "description": "Read latest observed paused stack; null when running or unobserved",
+      "parameters": {
+        "session_id": "optional"
+      }
+    },
+    "breakpoint_set": {
+      "description": "Set an exact-URL breakpoint; may pause execution when reached",
+      "parameters": {
+        "url": "required exact script URL",
+        "line": "required one-based",
+        "column": "one-based default 1",
+        "condition": "optional JavaScript expression",
+        "timeout": "seconds",
+        "session_id": "optional"
+      }
+    },
+    "breakpoint_remove": {
+      "description": "Remove an explicit breakpoint",
+      "parameters": {
+        "breakpoint_id": "required returned breakpointId",
+        "timeout": "seconds",
+        "session_id": "optional"
+      }
+    },
+    "resume": {
+      "description": "Explicitly resume a paused JavaScript target",
+      "parameters": {
+        "timeout": "seconds",
+        "session_id": "optional"
       }
     }
   }

@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
-from .engine import Runtime
+from .engine import Runtime, TERMINAL
 from .preview_hub import PreviewHub
 from .plugins import Catalog
 from .observability import configure_logging, log_event
@@ -135,6 +135,30 @@ def create_app(root: Path, token: str, *, preview_url: str | None = None):
     @app.get('/executions/{eid}', dependencies=secured)
     async def execution(eid: str):
         return app.state.runtime.execution(eid)
+
+    @app.get('/executions/{eid}/result', dependencies=secured)
+    async def execution_result(eid: str, wait_seconds: float = Query(0, ge=0, le=20),
+                               after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200)):
+        runtime = app.state.runtime
+        deadline = asyncio.get_running_loop().time() + wait_seconds
+        row = runtime.execution(eid)
+        while row['status'] not in TERMINAL:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(.05, remaining))
+            row = runtime.execution(eid)
+        events = runtime.store.all(
+            "SELECT * FROM events WHERE execution_id=? AND seq>? ORDER BY seq LIMIT ?",
+            (eid, after, limit + 1))
+        more = len(events) > limit
+        events = events[:limit]
+        for event in events:
+            event['payload'] = json.loads(event['payload'])
+        return dict(execution_id=eid, session_id=row['session_id'], status=row['status'],
+                    reason=row['reason'], done=row['status'] in TERMINAL,
+                    outputs=[e for e in events if e['kind'].startswith('output.') or e['kind'] == 'artifact.created'],
+                    cursor=events[-1]['seq'] if events else after, has_more=more)
 
     @app.post('/executions/{eid}/interrupt', dependencies=secured)
     async def interrupt(eid: str):

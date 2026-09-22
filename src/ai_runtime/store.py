@@ -42,6 +42,7 @@ class Store:
                 seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,
                 execution_id TEXT, kind TEXT, payload TEXT, created_at REAL);
             CREATE INDEX IF NOT EXISTS events_session_seq ON events(session_id, seq);
+            CREATE INDEX IF NOT EXISTS events_execution_seq ON events(execution_id, seq);
             CREATE TABLE IF NOT EXISTS artifacts (
                 id TEXT PRIMARY KEY, session_id TEXT, path TEXT, mime TEXT, size INTEGER);
         """)
