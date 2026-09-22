@@ -102,7 +102,7 @@ async def test_effects_real_preview_and_cleanup(tmp_path):
         m.close()
 
 
-def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path):
+def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path, caplog):
     folder = Path(scaffold(tmp_path / 'demo', 'demo'))
     with TestClient(create_app(tmp_path / 'data', 'test-token')) as client:
         assert client.get('/plugins').status_code == 401
@@ -131,3 +131,8 @@ def test_http_plugin_jobs_in_kernel_and_dedup(tmp_path):
         assert any(sid in e['payload'].get('text', '') and '"ok": true' in e['payload'].get('text', '') for e in events)
         job('unload', {'request_id': 'unload'})
         client.delete('/sessions/'+sid)
+        messages = '\n'.join(r.getMessage() for r in caplog.records if r.name == 'ai_runtime')
+        for event in ('runtime.ready', 'execution.queued', 'execution.reused', 'execution.succeeded', 'plugin.loaded', 'plugin.call', 'plugin.call_completed', 'plugin.unloaded', 'session.closed'):
+            assert event in messages
+        assert sid[:8] in messages
+        assert 'test-token' not in messages

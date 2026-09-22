@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from .observability import plugin_event
 
 ID = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
 
@@ -97,6 +98,7 @@ class Catalog:
                     raise ValueError('Plugin id already registered with another path or manifest')
             else:
                 db.execute('INSERT INTO plugins VALUES(?,?,?,?)', (manifest['id'], str(path), encoded, time.time()))
+        plugin_event('plugin.registered' if not row else 'plugin.registration_reused', plugin=manifest['id'], version=manifest['version'], path=str(path))
         return self.get(manifest['id'])
 
 
@@ -131,7 +133,15 @@ class PluginHandle:
         if not isinstance(arguments, dict):
             raise ValueError('arguments must be a JSON object')
         # The plugin validates action-specific parameters. Manifest descriptions are not a sandbox.
-        return json_copy(self._instance.call(action, json_copy(arguments)))
+        plugin_event('plugin.call', plugin=self.id, action=action, arguments=arguments)
+        started = time.monotonic()
+        try:
+            result = json_copy(self._instance.call(action, json_copy(arguments)))
+        except BaseException as exc:
+            plugin_event('plugin.call_failed', plugin=self.id, action=action, error=type(exc).__name__)
+            raise
+        plugin_event('plugin.call_completed', plugin=self.id, action=action, duration_ms=round((time.monotonic()-started)*1000))
+        return result
 
     def describe(self):
         return copy.deepcopy(self._manifest)
@@ -172,6 +182,7 @@ class PluginManager:
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         instance = None
+        plugin_event('plugin.loading', plugin=plugin_id, version=manifest['version'])
         try:
             spec.loader.exec_module(module)
             instance = module.create(self.context)
@@ -179,8 +190,10 @@ class PluginManager:
                 raise ValueError('Plugin must implement call(action, arguments) and close()')
             handle = PluginHandle(plugin_id, manifest, instance, name)
             self._loaded[plugin_id] = handle
+            plugin_event('plugin.loaded', plugin=plugin_id, version=manifest['version'])
             return handle
-        except BaseException:
+        except BaseException as exc:
+            plugin_event('plugin.load_failed', plugin=plugin_id, error=type(exc).__name__)
             try:
                 if instance is not None and callable(getattr(instance, 'close', None)):
                     instance.close()
@@ -193,10 +206,16 @@ class PluginManager:
         if not handle:
             return False
         # If cleanup fails, retain the handle so callers can inspect/retry cleanup.
-        handle._instance.close()
+        plugin_event('plugin.unloading', plugin=plugin_id)
+        try:
+            handle._instance.close()
+        except BaseException as exc:
+            plugin_event('plugin.unload_failed', plugin=plugin_id, error=type(exc).__name__)
+            raise
         handle._closed = True
         del self._loaded[plugin_id]
         self._forget(handle._module_name)
+        plugin_event('plugin.unloaded', plugin=plugin_id)
         return True
 
     def close(self):

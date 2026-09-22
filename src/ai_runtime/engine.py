@@ -11,6 +11,7 @@ from pathlib import Path
 
 from jupyter_client import AsyncKernelManager
 from .store import Store
+from .observability import MIME, log_event, code_summary
 
 TERMINAL = {'succeeded', 'failed', 'interrupted', 'unknown', 'cancelled'}
 OUTPUT_LIMIT = 4 * 1024 * 1024
@@ -48,6 +49,7 @@ class Runtime:
     def __init__(self, root: Path):
         self.store = Store(root)
         self.sessions = {}
+        self._execution_starts = {}
         self.lifecycle_lock = asyncio.Lock()
 
     def session(self, sid):
@@ -98,6 +100,7 @@ class Runtime:
             live.tasks.extend([asyncio.create_task(self._worker(live)), asyncio.create_task(self._watch(live))])
             self.store.execute("UPDATE sessions SET status='ready' WHERE id=?", (sid,))
             self.store.event(sid, None, 'session.ready', {'generation': row['generation']})
+            log_event('session.ready', session=sid[:8], generation=row['generation'], cwd=row['cwd'])
         except BaseException:
             if client:
                 client.stop_channels()
@@ -112,6 +115,7 @@ class Runtime:
         if old:
             if old['code'] != code or old['timeout'] != timeout:
                 raise ValueError('request_id already used with different code or timeout')
+            log_event('execution.reused', session=sid[:8], execution=old['id'][:8], request=request_id)
             return old
         live = self.sessions.get(sid)
         if not live or live.closing or self.session(sid)['status'] != 'ready':
@@ -122,6 +126,7 @@ class Runtime:
         self.store.execute('INSERT INTO executions VALUES(?,?,?,?,?,?,?,?)',
                            (eid, sid, request_id, code, timeout, 'queued', None, time.time()))
         self.store.event(sid, eid, 'execution.queued', {})
+        log_event('execution.queued', session=sid[:8], execution=eid[:8], request=request_id, timeout=timeout, code=code_summary(code))
         live.queue.put_nowait(eid)
         return self.execution(eid)
 
@@ -157,6 +162,13 @@ class Runtime:
                     self.store.event(sid, eid, 'output.truncated', {'limit_bytes': OUTPUT_LIMIT})
                 return
         data = content.get('data', {})
+        notice = data.get(MIME)
+        if isinstance(notice, dict) and str(notice.get('event', '')).startswith('plugin.'):
+            fields = notice.get('fields', {})
+            if isinstance(fields, dict):
+                log_event(notice['event'], level=30 if notice['event'].endswith('_failed') else 20, session=sid[:8], execution=eid[:8] if eid else None, details=fields)
+                self.store.event(sid, eid, notice['event'], fields)
+                return
         # Preserve MIME bundles but store binary images separately.
         for mime, suffix in [('image/png', '.png'), ('image/jpeg', '.jpg')]:
             if mime in data:
@@ -202,6 +214,8 @@ class Runtime:
                 live.active = pending
                 self.store.execute("UPDATE executions SET status='running' WHERE id=?", (eid,))
                 self.store.event(live.id, eid, 'execution.started', {})
+                self._execution_starts[eid] = time.monotonic()
+                log_event('execution.started', session=live.id[:8], execution=eid[:8])
                 msgid = live.client.execute(row['code'], allow_stdin=False, stop_on_error=False)
                 live.pending[msgid] = pending
                 try:
@@ -236,10 +250,13 @@ class Runtime:
         row = self.execution(eid)
         self.store.execute('UPDATE executions SET status=?,reason=? WHERE id=?', (status, reason, eid))
         self.store.event(row['session_id'], eid, 'execution.' + status, {'reason': reason})
+        started = self._execution_starts.pop(eid, None)
+        log_event('execution.' + status, level=20 if status == 'succeeded' else 30, session=row['session_id'][:8], execution=eid[:8], duration_ms=round((time.monotonic()-started)*1000) if started is not None else None, reason=reason)
 
     async def _send_interrupt(self, live, pending):
         self.store.execute("UPDATE executions SET status='interrupting',reason=? WHERE id=?", (pending.reason, pending.execution_id))
         self.store.event(live.id, pending.execution_id, 'execution.interrupting', {'reason': pending.reason})
+        log_event('execution.interrupting', session=live.id[:8], execution=pending.execution_id[:8], reason=pending.reason)
         try:
             await live.manager.interrupt_kernel()
         except Exception as exc:
@@ -270,6 +287,7 @@ class Runtime:
             return
         self.store.execute("UPDATE sessions SET status='lost' WHERE id=?", (live.id,))
         self.store.event(live.id, None, 'session.lost', {'reason': reason})
+        log_event('session.lost', level=30, session=live.id[:8], reason=reason)
         if live.active:
             live.active.lost = True
             live.active.reason = reason
@@ -298,6 +316,7 @@ class Runtime:
             self._finish(row['id'], 'cancelled' if row['status'] == 'queued' else 'unknown', 'session closed')
         self.store.execute("UPDATE sessions SET status='closed' WHERE id=?", (sid,))
         self.store.event(sid, None, 'session.closed', {})
+        log_event('session.closed', session=sid[:8])
 
     async def restart(self, sid):
         async with self.lifecycle_lock:

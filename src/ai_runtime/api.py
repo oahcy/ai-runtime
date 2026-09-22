@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .engine import Runtime
 from .plugins import Catalog
+from .observability import configure_logging, log_event
 
 
 class AddPlugin(BaseModel):
@@ -44,12 +45,16 @@ def create_app(root: Path, token: str):
 
     @asynccontextmanager
     async def lifespan(app):
+        configure_logging()
         runtime = Runtime(root)
         app.state.runtime = runtime
         try:
+            registered = Catalog(root).list()
+            log_event('runtime.ready', data_dir=str(root.resolve()), registered_plugins=[p['id'] for p in registered])
             yield
         finally:
             await runtime.close()
+            log_event('runtime.stopped')
 
     app = FastAPI(title='Local AI Runtime', version='0.1.0', lifespan=lifespan)
     bearer = HTTPBearer(auto_error=False)
