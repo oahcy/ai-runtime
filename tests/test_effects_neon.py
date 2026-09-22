@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "effects"))
 import math
 import pytest
 from neon import NeonPreview

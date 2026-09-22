@@ -119,8 +119,12 @@ display(Image(filename='screenshot.png'))
 
 通过 `runtime.preview.start()` 打开通用 JSON 状态窗口，再用 `runtime.preview.update(...)` 实时修改状态。自定义界面使用 `Preview(html=..., state=...)`，动画和业务逻辑放在示例中。详见 [Live Preview](docs/live-preview.md)。
 
-## 风洞实时预览示例
+## 插件
 
-[examples/live-lab](examples/live-lab/README.md) 与 Runtime 一起维护，展示 Python 后台模拟、WebSocket 状态推送和 Canvas 实时显示。创建会话时，将工作目录设为仓库下的 `examples/live-lab`，再运行 `from lab import WindTunnel`。
+Runtime 管理注册清单、会话内加载和生命周期；具体效果与外部工具通过插件提供。
 
-霓虹星轨示例见 [examples/neon](examples/neon/README.md)，包含动画页面和场景参数校验。
+- [插件接口与新增插件指南](docs/plugins.md)
+- [effects 效果测试插件](plugins/effects/README.md)：霓虹与风洞
+- [插件调用示例](examples/effects_plugin.py)
+
+先注册：`.\.venv\Scripts\python.exe -m ai_runtime.plugins add D:/prj/ai-runtime/plugins/effects`。

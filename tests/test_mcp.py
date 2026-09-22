@@ -15,6 +15,7 @@ from mcp.client.stdio import stdio_client
 from mcp.server.fastmcp.exceptions import ToolError
 
 from ai_runtime.api import create_app
+from ai_runtime.plugins import scaffold
 from ai_runtime.mcp_server import Bridge, create_server
 
 PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='
@@ -46,7 +47,7 @@ async def test_bridge_auth_error_and_image(tmp_path):
     assert result.content[0].data == PNG
     server = create_server(bridge)
     tools = await server.list_tools()
-    assert len(tools) == 12
+    assert len(tools) == 18
     by_name = {tool.name: tool for tool in tools}
     assert by_name['execute'].annotations.readOnlyHint is False
     assert by_name['read_artifact'].annotations.readOnlyHint is True
@@ -98,8 +99,14 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
         async with stdio_client(parameters) as (reader, writer):
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
-                assert len((await client.list_tools()).tools) == 12
+                assert len((await client.list_tools()).tools) == 18
+                plugin_dir = scaffold(tmp_path / 'mcp-plugin', 'mcp-test')
+                unpack(await client.call_tool('add_plugin', {'path': plugin_dir}))
+                assert unpack(await client.call_tool('get_plugin', {'plugin_id': 'mcp-test'}))['id'] == 'mcp-test'
+                assert len(unpack(await client.call_tool('list_plugins', {}))['plugins']) == 1
                 sid = unpack(await client.call_tool('create_session', {'cwd': str(tmp_path)}))['id']
+                plugin_job = unpack(await client.call_tool('call_plugin', {'session_id': sid, 'plugin_id': 'mcp-test', 'request_id': 'plugin-ping', 'action': 'ping', 'arguments': {}}))
+                assert unpack(await client.call_tool('wait_execution', {'execution_id': plugin_job['id']}))['status'] == 'succeeded'
                 job = unpack(await client.call_tool('execute', {'session_id': sid, 'request_id': 'first', 'code': 'answer = 40'}))
                 assert unpack(await client.call_tool('wait_execution', {'execution_id': job['id']}))['status'] == 'succeeded'
         # A new MCP process must reuse daemon-owned state rather than create another kernel.

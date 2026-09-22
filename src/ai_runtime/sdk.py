@@ -39,3 +39,38 @@ def checkpoint_load():
 
 # Kernel-owned browser preview; starts only when explicitly requested.
 from . import preview
+
+
+class _Plugins:
+    """Lazy, session-scoped plugin manager exposed as runtime.plugins."""
+    def __init__(self):
+        self._manager = None
+
+    def _get_manager(self):
+        if self._manager is None:
+            import atexit
+            from .plugins import Catalog, PluginContext, PluginManager
+            folder = _root().resolve()
+            self._manager = PluginManager(
+                Catalog(folder.parent.parent),
+                PluginContext(1, folder.name, folder, Path.cwd()))
+            atexit.register(self._manager.close)
+        return self._manager
+
+    def list(self):
+        return self._get_manager().list()
+
+    def get(self, plugin_id):
+        return self._get_manager().get(plugin_id)
+
+    def add(self, path):
+        return self._get_manager().add(path)
+
+    def load(self, plugin_id):
+        return self._get_manager().load(plugin_id)
+
+    def unload(self, plugin_id):
+        return self._get_manager().unload(plugin_id)
+
+
+plugins = _Plugins()

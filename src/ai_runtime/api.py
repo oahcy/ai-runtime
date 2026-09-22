@@ -11,6 +11,21 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .engine import Runtime
+from .plugins import Catalog
+
+
+class AddPlugin(BaseModel):
+    path: str
+
+
+class PluginJob(BaseModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    timeout: float = Field(default=30, ge=0.1, le=3600)
+
+
+class PluginCall(PluginJob):
+    action: str
+    arguments: dict = Field(default_factory=dict)
 
 
 class CreateSession(BaseModel):
@@ -156,5 +171,43 @@ def create_app(root: Path, token: str):
         runtime.session(sid)
         path = runtime.store.root / 'sessions' / sid / 'checkpoint.json'
         return json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
+
+
+    @app.get('/plugins', dependencies=secured)
+    async def plugins():
+        return {'plugins': Catalog(root).list()}
+
+    @app.get('/plugins/{plugin_id}', dependencies=secured)
+    async def plugin(plugin_id: str):
+        return Catalog(root).get(plugin_id)
+
+    @app.post('/plugins', dependencies=secured)
+    async def add_plugin(body: AddPlugin):
+        return Catalog(root).add(body.path)
+
+    def plugin_job(sid, plugin_id, body, operation):
+        Catalog(root).get(plugin_id)
+        target = 'runtime.plugins'
+        if operation == 'load':
+            expression = f'{target}.load({plugin_id!r}).describe()'
+        elif operation == 'unload':
+            expression = f'{target}.unload({plugin_id!r})'
+        else:
+            arguments = json.dumps(body.arguments, allow_nan=False)
+            expression = f'{target}.load({plugin_id!r}).call({body.action!r}, __import__("json").loads({arguments!r}))'
+        code = f'print(__import__("json").dumps({expression}, ensure_ascii=False, allow_nan=False))'
+        return app.state.runtime.submit(sid, body.request_id, code, body.timeout)
+
+    @app.post('/sessions/{sid}/plugins/{plugin_id}/load', dependencies=secured, status_code=202)
+    async def load_plugin(sid: str, plugin_id: str, body: PluginJob):
+        return plugin_job(sid, plugin_id, body, 'load')
+
+    @app.post('/sessions/{sid}/plugins/{plugin_id}/call', dependencies=secured, status_code=202)
+    async def call_plugin(sid: str, plugin_id: str, body: PluginCall):
+        return plugin_job(sid, plugin_id, body, 'call')
+
+    @app.post('/sessions/{sid}/plugins/{plugin_id}/unload', dependencies=secured, status_code=202)
+    async def unload_plugin(sid: str, plugin_id: str, body: PluginJob):
+        return plugin_job(sid, plugin_id, body, 'unload')
 
     return app

@@ -99,6 +99,8 @@ MCP 集成测试会启动独立 HTTP 服务和真实 STDIO Adapter，通过官�
 ## 当前边界
 
 - Adapter 仅接受 loopback HTTP origin，禁用环境代理、HTTP 重定向和自动写请求重试。
-- 桌面/DevTools/ADB 插件机制尚未实现，不会返回虚假的插件列表。后续插件通过普通 Python 代码使用，MCP 层无需逐个增加插件工具。
+- 本地插件接口已实现：新增 list_plugins、get_plugin、add_plugin、load_plugin、call_plugin、unload_plugin 六个工具；详见 [插件说明](plugins.md)。DevTools/ADB 具体插件尚未实现。
 - token 代表本机可信执行权限；首版依旧不是沙箱。
 - WebSocket 仍是 Runtime API 能力；MCP 层目前按游标读取事件，没有向闲置模型主动推送唤醒事件。
+
+插件接口加入后共有18个 MCP 工具；新增工具需在重启服务并重新连接 MCP 后使用。

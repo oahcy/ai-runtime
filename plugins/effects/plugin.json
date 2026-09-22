@@ -1,0 +1,41 @@
+{
+  "id": "effects",
+  "name": "效果测试插件",
+  "version": "0.1.0",
+  "api_version": 1,
+  "description": "霓虹参数动画与 Python 粒子风洞，用于验证持久对象和实时预览。",
+  "entry": "plugin.py",
+  "actions": {
+    "start": {
+      "description": "Start neon or wind; repeat returns same running scene.",
+      "parameters": {
+        "scene": "neon | wind (default neon)",
+        "count": "wind only: integer 10..1500, default 800"
+      }
+    },
+    "configure": {
+      "description": "Change a running scene without restarting it.",
+      "parameters": {
+        "scene": "neon | wind",
+        "changes": "neon: hue,speed,particles,rings,glow,spread,title; wind: wind,vortices,obstacles,paused",
+        "message": "optional operation log"
+      }
+    },
+    "snapshot": {
+      "description": "Read complete state and history.",
+      "parameters": {
+        "scene": "neon | wind"
+      }
+    },
+    "status": {
+      "description": "Read active preview URLs and revisions.",
+      "parameters": {}
+    },
+    "stop": {
+      "description": "Stop one scene and release its server and background thread.",
+      "parameters": {
+        "scene": "neon | wind"
+      }
+    }
+  }
+}

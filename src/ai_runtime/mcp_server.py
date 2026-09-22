@@ -91,7 +91,7 @@ def create_server(bridge: Bridge):
         'execute returns a job ID, not its output. Use wait_execution/get_execution and read_events, then read_artifact for images. '
         'Never automatically replay unknown executions or restart kernels: inspect external effects first. '
         'Restart discards all Python memory; checkpoints only store explicit JSON. '
-        'Plugins are not implemented yet. Use normal Python libraries and the preloaded runtime SDK.'
+        'Use list_plugins/get_plugin to discover local plugins; add_plugin registers a trusted local directory. Plugin load/call/unload run as queued kernel jobs. Use normal Python libraries and the preloaded runtime SDK.'
     ))
 
     @server.tool(annotations=READ)
@@ -167,6 +167,42 @@ def create_server(bridge: Bridge):
     async def read_artifact(artifact_id: Identifier) -> CallToolResult:
         """Return artifact contents (max 8 MiB), with images as native MCP image blocks for visual inspection."""
         return await bridge.artifact(artifact_id)
+
+
+    @server.tool(annotations=READ)
+    async def list_plugins() -> dict:
+        """List registered local Runtime plugins without executing plugin code."""
+        return await bridge.request('GET', '/plugins')
+
+    @server.tool(annotations=READ)
+    async def get_plugin(plugin_id: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')]) -> dict:
+        """Read plugin manifest, action parameter descriptions and registered path."""
+        return await bridge.request('GET', f'/plugins/{plugin_id}')
+
+    @server.tool(annotations=WRITE)
+    async def add_plugin(path: str) -> dict:
+        """Register a trusted local plugin directory containing plugin.json. No download, pip install or execution."""
+        return await bridge.request('POST', '/plugins', {'path': path})
+
+    @server.tool(annotations=WRITE)
+    async def load_plugin(session_id: Identifier, plugin_id: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')],
+                          request_id: Annotated[str, Field(min_length=1, max_length=128)]) -> dict:
+        """Queue plugin creation in this kernel. Returns execution ID; wait and read_events for result."""
+        return await bridge.request('POST', f'/sessions/{session_id}/plugins/{plugin_id}/load', {'request_id': request_id})
+
+    @server.tool(annotations=WRITE)
+    async def call_plugin(session_id: Identifier, plugin_id: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')],
+                          request_id: Annotated[str, Field(min_length=1, max_length=128)],
+                          action: str, arguments: dict, timeout: Annotated[float, Field(ge=0.1, le=3600)] = 30) -> dict:
+        """Queue a manifest action, loading the plugin if needed. Returns execution ID, not action result. Reuse request_id only for identical retries."""
+        return await bridge.request('POST', f'/sessions/{session_id}/plugins/{plugin_id}/call',
+                                    {'request_id': request_id, 'action': action, 'arguments': arguments, 'timeout': timeout})
+
+    @server.tool(annotations=WRITE)
+    async def unload_plugin(session_id: Identifier, plugin_id: Annotated[str, Field(pattern=r'^[a-z][a-z0-9_-]{0,63}$')],
+                            request_id: Annotated[str, Field(min_length=1, max_length=128)]) -> dict:
+        """Queue plugin close() and unload its kernel instance; registration is retained. Returns execution ID."""
+        return await bridge.request('POST', f'/sessions/{session_id}/plugins/{plugin_id}/unload', {'request_id': request_id})
 
     return server
 

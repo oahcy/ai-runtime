@@ -1,6 +1,9 @@
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "effects"))
 import math
 import pytest
-from lab import WindTunnel
+from wind_tunnel import WindTunnel
 
 
 def test_wind_changes_actual_particle_motion():

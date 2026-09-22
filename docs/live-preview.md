@@ -33,11 +33,11 @@ html 为可信本机代码，在实例创建时读取，不自动热替换。只
 
 ## 示例
 
-- [霓虹星轨](../examples/neon/README.md)：浏览器动画，Python 实时改变参数。
-- [粒子风洞](../examples/live-lab/README.md)：Python 持续模拟，浏览器显示粒子位置。
+- [effects / neon](../plugins/effects/README.md)：浏览器动画，Python 实时改变参数。
+- [effects / wind](../plugins/effects/README.md)：Python 持续模拟，浏览器显示粒子位置。
 
 只监听 127.0.0.1，默认随机空闲端口。凭证独立于 Runtime 主 token，通过 URL fragment 提供。
 WebSocket 校验 Origin 和凭证，不提供浏览器执行 Python 的接口。
 重连立即获得完整最新快照；50ms 轮询检测状态变化，快速更新可能合并。
 info() 获取链接，snapshot() 读取状态，stop() 停止预览。状态不自动持久化。
-从旧版迁移霓虹示例时，请在新 kernel 使用 NeonPreview；已有 kernel 中载入的旧类不会自动热更新。
+从旧版迁移时，注册 effects 插件后在新 kernel 使用 runtime.plugins.load("effects")；已有 kernel 中载入的旧类不会自动热更新。

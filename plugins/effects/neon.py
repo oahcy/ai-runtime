@@ -11,7 +11,7 @@ RANGES = dict(hue=(0, 360), speed=(0, 3), particles=(0, 2000),
 
 class NeonPreview(Preview):
     def __init__(self):
-        super().__init__(html=Path(__file__).with_name("index.html").read_text(encoding="utf-8"), state=DEFAULTS)
+        super().__init__(html=Path(__file__).with_name('neon.html').read_text(encoding="utf-8"), state=DEFAULTS)
 
     def update(self, *, message="Scene updated", **changes):
         for key, value in changes.items():

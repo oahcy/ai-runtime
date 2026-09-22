@@ -143,4 +143,8 @@ Windows Job Object/其他系统资源约束、磁盘与内存配额、历史清�
 
 ## 本地 MCP Adapter（后续已实现）
 
-新增 `src/ai_runtime/mcp_server.py`：官方 MCP STDIO → loopback HTTP → 原有 Runtime，不进入数据库或 kernel 生命周期。支持 12 个工具，包含执行去重参数、事件游标及原生图片内容。Adapter 重启不影响 kernel，会话归 Runtime 管理。完整使用方式与远程接入边界见 [mcp.md](mcp.md)。
+新增 `src/ai_runtime/mcp_server.py`：官方 MCP STDIO → loopback HTTP → 原有 Runtime，不进入数据库或 kernel 生命周期。支持 18 个工具（12 个基础工具和 6 个插件工具），包含执行去重参数、事件游标及原生图片内容。Adapter 重启不影响 kernel，会话归 Runtime 管理。完整使用方式与远程接入边界见 [mcp.md](mcp.md)。
+
+## 本地插件 v1
+
+插件清单持久化到数据目录 plugins.sqlite3；守护进程只读元数据及提交任务。插件在 kernel 内创建，按会话缓存实例，通过 create(context)、call(action, arguments)、close() 管理。具体见 [插件接口](plugins.md)。效果实现位于 plugins/effects，examples 只保留使用演示。

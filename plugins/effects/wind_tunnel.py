@@ -10,7 +10,7 @@ from ai_runtime.preview import Preview
 
 class WindTunnel(Preview):
     def __init__(self, count=600, seed=42):
-        super().__init__(html=Path(__file__).with_name("index.html").read_text(encoding="utf-8"))
+        super().__init__(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
         if not isinstance(count, int) or not 10 <= count <= 1500:
             raise ValueError('count must be an integer between 10 and 1500')
         rng = random.Random(seed)
