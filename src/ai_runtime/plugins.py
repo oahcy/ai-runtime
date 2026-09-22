@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
+from .plugin_services import Resources, PreviewService, ArtifactService
 from .observability import plugin_event, PluginLogger
 
 ID = re.compile(r'^[a-z][a-z0-9_-]{0,63}$')
@@ -123,6 +124,9 @@ class PluginContext:
     session_dir: Path
     workdir: Path
     logger: PluginLogger | None = None
+    preview: PreviewService | None = None
+    artifacts: ArtifactService | None = None
+    resources: Resources | None = None
 
 
 class Plugin(Protocol):
@@ -131,15 +135,18 @@ class Plugin(Protocol):
 
 
 class PluginHandle:
-    def __init__(self, plugin_id, manifest, instance, module_name):
+    def __init__(self, plugin_id, manifest, instance, module_name, context):
         self.id = plugin_id
         self._manifest = manifest
         self._instance = instance
         self._module_name = module_name
         self._closed = False
+        self.context = context
+        self._cleanup_only = False
+        self._hook_closed = False
 
     def call(self, action, arguments=None):
-        if self._closed:
+        if self._closed or self._cleanup_only:
             raise ValueError('Plugin handle is closed')
         if action not in self._manifest['actions']:
             raise ValueError(f'Unknown plugin action: {action}')
@@ -167,12 +174,16 @@ class PluginManager:
     def __init__(self, catalog, context):
         self.catalog, self.context = catalog, context
         self._loaded = {}
+        self._cleanup_reports = {}
 
     def list(self):
         return [dict(row, loaded=row['id'] in self._loaded) for row in self.catalog.list()]
 
     def get(self, plugin_id):
-        return dict(self.catalog.get(plugin_id), loaded=plugin_id in self._loaded)
+        handle = self._loaded.get(plugin_id)
+        return dict(self.catalog.get(plugin_id), loaded=handle is not None,
+                    cleanup_pending=bool(handle and handle._cleanup_only),
+                    resources=handle.context.resources.report() if handle else None)
 
     def add(self, path):
         return self.catalog.add(path)
@@ -185,7 +196,10 @@ class PluginManager:
 
     def load(self, plugin_id):
         if plugin_id in self._loaded:
-            return self._loaded[plugin_id]
+            handle = self._loaded[plugin_id]
+            if handle._cleanup_only:
+                raise RuntimeError('Plugin cleanup incomplete; unload before loading again')
+            return handle
         row = self.catalog.get(plugin_id)
         manifest = read_manifest(row['path'])
         if manifest != row['manifest']:
@@ -197,36 +211,61 @@ class PluginManager:
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         instance = None
+        resources = Resources()
+        context = replace(self.context, logger=PluginLogger(plugin_id),
+                          resources=resources, preview=PreviewService(resources),
+                          artifacts=ArtifactService(self.context.session_dir, resources))
         plugin_event('plugin.loading', plugin=plugin_id, version=manifest['version'])
         try:
             spec.loader.exec_module(module)
-            instance = module.create(replace(self.context, logger=PluginLogger(plugin_id)))
+            instance = module.create(context)
             if not callable(getattr(instance, 'call', None)) or not callable(getattr(instance, 'close', None)):
                 raise ValueError('Plugin must implement call(action, arguments) and close()')
-            handle = PluginHandle(plugin_id, manifest, instance, name)
+            handle = PluginHandle(plugin_id, manifest, instance, name, context)
             self._loaded[plugin_id] = handle
             plugin_event('plugin.loaded', plugin=plugin_id, version=manifest['version'])
             return handle
         except BaseException as exc:
             plugin_event('plugin.load_failed', plugin=plugin_id, error=type(exc).__name__)
+            # Even a factory which raises before returning may have registered resources.
+            handle = PluginHandle(plugin_id, manifest, instance, name, context)
+            handle._cleanup_only = True
+            self._loaded[plugin_id] = handle
             try:
-                if instance is not None and callable(getattr(instance, 'close', None)):
-                    instance.close()
-            finally:
-                self._forget(name)
+                self.unload(plugin_id)
+            except BaseException:
+                pass  # Keep the failed handle/module so cleanup can be retried.
             raise
+
+    def cleanup_report(self, plugin_id):
+        return copy.deepcopy(self._cleanup_reports.get(plugin_id))
 
     def unload(self, plugin_id):
         handle = self._loaded.get(plugin_id)
         if not handle:
             return False
-        # If cleanup fails, retain the handle so callers can inspect/retry cleanup.
+        handle._cleanup_only = True
+        resources = handle.context.resources
+        resources.begin_close()
         plugin_event('plugin.unloading', plugin=plugin_id)
-        try:
-            handle._instance.close()
-        except BaseException as exc:
-            plugin_event('plugin.unload_failed', plugin=plugin_id, error=type(exc).__name__)
-            raise
+        hook_error = None
+        if not handle._hook_closed:
+            try:
+                close = getattr(handle._instance, 'close', None)
+                if callable(close):
+                    close()
+                handle._hook_closed = True
+            except BaseException as exc:
+                hook_error = type(exc).__name__
+        report = resources.close_all()
+        report.update(plugin=plugin_id, hook={'status': 'closed' if handle._hook_closed else 'failed',
+                                            'error': hook_error})
+        report['ok'] = report['ok'] and handle._hook_closed
+        self._cleanup_reports[plugin_id] = report
+        plugin_event('plugin.cleanup', **report)
+        if not report['ok']:
+            plugin_event('plugin.unload_failed', plugin=plugin_id, error='CleanupIncomplete')
+            raise RuntimeError('Plugin cleanup incomplete; inspect runtime.plugins.cleanup_report and retry unload')
         handle._closed = True
         del self._loaded[plugin_id]
         self._forget(handle._module_name)

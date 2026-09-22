@@ -121,7 +121,7 @@ display(Image(filename='screenshot.png'))
 
 ## 插件
 
-Runtime 管理注册清单、会话内加载和生命周期；具体效果与外部工具通过插件提供。
+Runtime 管理注册清单、会话内加载和生命周期；具体效果与外部工具通过插件提供。插件统一使用 context.logger / preview / artifacts / resources，登记的后台资源在卸载时回收并报告清理结果。
 
 - [插件接口与新增插件指南](docs/plugins.md)
 - [effects 效果测试插件](plugins/effects/README.md)：霓虹与风洞

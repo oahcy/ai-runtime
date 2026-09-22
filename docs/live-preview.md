@@ -74,3 +74,8 @@ WebSocket 校验 Origin 和凭证，不提供浏览器执行 Python 的接口。
 重连立即获得完整最新快照；50ms 轮询检测状态变化，快速更新可能合并。
 info() 获取链接，snapshot() 读取状态，stop() 停止预览。状态不自动持久化。
 从旧版迁移时，注册 effects 插件后在新 kernel 使用 runtime.plugins.load("effects")；已有 kernel 中载入的旧类不会自动热更新。
+
+
+## 插件使用托管预览
+
+在插件中优先使用 context.preview.create(html=html, state=state)，返回同样的数据发布接口，并自动加入插件资源登记。插件 unload 时兜底停止服务；stop 后不再重启同一托管实例，需重新 create。普通 SDK 的 Preview 仍可独立使用，其生命周期由调用者负责。

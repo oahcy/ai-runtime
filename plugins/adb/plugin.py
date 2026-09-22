@@ -7,7 +7,6 @@ import subprocess
 import tempfile
 import math
 import time
-from ai_runtime.sdk import save_artifact
 
 
 class Adb:
@@ -194,7 +193,7 @@ class Adb:
         result=self._run(['-s',serial,*args],seconds,binary=action=='screenshot')
         if action=='screenshot':
             if not result.startswith(b'\x89PNG\r\n\x1a\n'): raise ValueError('ADB did not return a PNG screenshot')
-            artifact=save_artifact(result,'adb-screen.png','image/png')
+            artifact=self.context.artifacts.save(result,'adb-screen.png','image/png')
             self.context.logger.info('ADB screenshot saved',device=serial,bytes=len(result))
             return {'serial':serial,'artifact':artifact}
         if result['returncode']:

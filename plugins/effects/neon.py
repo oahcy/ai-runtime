@@ -9,9 +9,10 @@ RANGES = dict(hue=(0, 360), speed=(0, 3), particles=(0, 2000),
               glow=(0, 1.5), rings=(1, 10), spread=(0.5, 1.5))
 
 
-class NeonPreview(Preview):
-    def __init__(self):
-        super().__init__(html=Path(__file__).with_name('neon.html').read_text(encoding="utf-8"), state=DEFAULTS)
+class NeonPreview:
+    def __init__(self, context=None):
+        factory = context.preview.create if context else Preview
+        self._view = factory(html=Path(__file__).with_name('neon.html').read_text(encoding="utf-8"), state=DEFAULTS)
 
     def update(self, *, message="Scene updated", **changes):
         for key, value in changes.items():
@@ -26,4 +27,16 @@ class NeonPreview(Preview):
                     raise ValueError(f'{key} must be an integer')
             else:
                 raise ValueError(f'Unknown scene parameter: {key}')
-        return super().update(message=message, **changes)
+        return self._view.update(message=message, **changes)
+
+    def start(self, port=0):
+        return self._view.start(port)
+
+    def stop(self):
+        return self._view.stop()
+
+    def info(self):
+        return self._view.info()
+
+    def snapshot(self):
+        return self._view.snapshot()

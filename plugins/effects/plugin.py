@@ -18,10 +18,10 @@ class Effects:
             if name not in self.scenes:
                 if name == 'neon':
                     from .neon import NeonPreview
-                    scene = NeonPreview()
+                    scene = NeonPreview(context=self.context)
                 else:
                     from .wind_tunnel import WindTunnel
-                    scene = WindTunnel(count=arguments.get('count', 800))
+                    scene = WindTunnel(count=arguments.get('count', 800), context=self.context)
                 self.scenes[name] = scene
             elif 'count' in arguments and len(self.scenes[name].points) != arguments['count']:
                 raise ValueError('Stop the scene before changing count')

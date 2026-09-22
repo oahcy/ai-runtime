@@ -11,7 +11,11 @@ def _root():
 
 
 def save_artifact(data: bytes | str, name='artifact', mime='application/octet-stream'):
-    folder = _root() / 'artifacts'
+    return _save_artifact(_root(), data, name, mime)
+
+
+def _save_artifact(root, data, name='artifact', mime='application/octet-stream'):
+    folder = Path(root) / 'artifacts'
     folder.mkdir(parents=True, exist_ok=True)
     # Names are labels, never paths supplied by callers.
     suffix = Path(name).suffix[:16]
@@ -68,6 +72,9 @@ class _Plugins:
 
     def load(self, plugin_id):
         return self._get_manager().load(plugin_id)
+
+    def cleanup_report(self, plugin_id):
+        return self._get_manager().cleanup_report(plugin_id)
 
     def unload(self, plugin_id):
         return self._get_manager().unload(plugin_id)

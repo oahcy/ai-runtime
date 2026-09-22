@@ -9,8 +9,11 @@ from ai_runtime.preview import Preview
 
 
 class WindTunnel:
-    def __init__(self, count=600, seed=42):
-        self._view = Preview(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
+    def __init__(self, count=600, seed=42, context=None):
+        self.context = context
+        self._worker_resource = None
+        factory = context.preview.create if context else Preview
+        self._view = factory(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
         if not isinstance(count, int) or not 10 <= count <= 1500:
             raise ValueError('count must be an integer between 10 and 1500')
         rng = random.Random(seed)
@@ -122,10 +125,19 @@ class WindTunnel:
         if not self._physics or not self._physics.is_alive():
             self._stop.clear()
             self._physics=threading.Thread(target=self._run,daemon=True,name='wind-physics')
+            if self.context:
+                self._worker_resource = self.context.resources.track_thread(
+                    self._physics, stop=self._stop.set, name='wind-physics')
             self._physics.start()
         return info
 
     def stop(self):
         self._stop.set()
-        if self._physics: self._physics.join(3)
+        if self._worker_resource:
+            self._worker_resource.close()
+            self._worker_resource = None
+        elif self._physics:
+            self._physics.join(3)
+            if self._physics.is_alive():
+                raise RuntimeError('Wind physics shutdown not confirmed')
         self._view.stop()

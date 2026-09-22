@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
 from urllib.request import build_opener, ProxyHandler, HTTPRedirectHandler
 from websockets.sync.client import connect
-from ai_runtime.sdk import save_artifact
 
 
 def timeout(value):
@@ -44,6 +43,8 @@ class DevTools:
         self.context = context
         self.ws = None
         self.reader = None
+        self._socket_resource = None
+        self._reader_resource = None
         self.lock = threading.Lock()
         self.send_lock = threading.Lock()
         self.pending = {}
@@ -268,7 +269,13 @@ class DevTools:
             if 'proxy' in inspect.signature(connect).parameters: options['proxy']=None
             if 'ping_interval' in inspect.signature(connect).parameters:
                 options['ping_interval'] = 20 if heartbeat else None
+            self.context.resources.ensure_open()
             ws=connect(url,**options)
+            try:
+                self._socket_resource = self.context.resources.register('debugger-socket', ws.close, kind='connection')
+            except BaseException:
+                ws.close()
+                raise
             with self.lock:
                 self.event_buffer.clear()
                 start_cursor = self.sequence
@@ -280,6 +287,8 @@ class DevTools:
                 self.heartbeat = heartbeat
             self.ws,self.url,self.last_error=ws,url,None
             self.reader=threading.Thread(target=self._receive,args=(ws,),daemon=True,name='cdp-events')
+            self._reader_resource = self.context.resources.track_thread(
+                self.reader, stop=ws.close, name='debugger-reader')
             self.reader.start()
             self.context.logger.info('Debugger connected')
             return {'connected':True,'url':url,'cursor':start_cursor}
@@ -314,18 +323,19 @@ class DevTools:
         result=self._command('Page.captureScreenshot',{'format':'png'},seconds,session_id)
         raw=base64.b64decode(result['data'],validate=True)
         if not raw.startswith(b'\x89PNG\r\n\x1a\n'): raise ValueError('Debugger returned invalid PNG')
-        artifact=save_artifact(raw,'devtools.png','image/png')
+        artifact=self.context.artifacts.save(raw,'devtools.png','image/png')
         self.context.logger.info('Debugger screenshot saved',bytes=len(raw))
         return {'artifact':artifact}
 
     def close(self):
-        ws=self.ws
-        if ws is not None: ws.close()
-        if self.reader is not None:
-            self.reader.join(3)
-            if self.reader.is_alive(): raise RuntimeError('Debugger reader shutdown not confirmed')
-        self.ws=None
-        self.reader=None
+        if self._reader_resource is not None:
+            self._reader_resource.close()
+            self._reader_resource = None
+        if self._socket_resource is not None:
+            self._socket_resource.close()
+            self._socket_resource = None
+        self.ws = None
+        self.reader = None
 
 
 def create(context):
