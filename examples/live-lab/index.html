@@ -1,0 +1,56 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FLOW / 实时粒子风洞</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#090e16;color:#dce7ee;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;padding:22px 28px;border-bottom:1px solid #24313c;background:#0e1520}.logo{font-size:22px;font-weight:700;letter-spacing:5px}.logo span{font:10px monospace;letter-spacing:2px;color:#7e969c;margin-left:14px}#status{font:12px monospace;color:#ffbb71}
+main{padding:28px;max-width:1550px;margin:auto}.intro{display:flex;justify-content:space-between;align-items:end;margin-bottom:22px}h1{font-size:25px;font-weight:500;margin:0 0 8px}p{font-size:12px;color:#879ba7;line-height:1.8;margin:0}.tag{color:#62d6ba;font:11px monospace;border:1px solid #285247;border-radius:30px;padding:8px 12px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}.metric{padding:16px 20px;border:1px solid #273340;background:#101923;border-radius:9px}.metric label{font-size:11px;color:#7b949d;display:block;margin-bottom:9px}.metric b{font:25px monospace;color:#dbf4eb}.metric small{font:10px monospace;color:#789093;margin-left:8px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:18px}.panel{border:1px solid #293743;border-radius:10px;overflow:hidden;background:#0b131d}.bar{display:flex;justify-content:space-between;padding:14px 17px;border-bottom:1px solid #263341;font-size:11px;color:#8aa1ac}.bar strong{font-weight:400;color:#63dabb;font-family:monospace}.canvas-wrap{position:relative;aspect-ratio:5/3}canvas{display:block;width:100%;height:100%}.legend{display:flex;gap:16px;padding:12px 17px;font:10px monospace;color:#86a4aa;border-top:1px solid #263341}.legend i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;background:#64ecc3}.legend span:nth-child(2) i{background:#efb56b}.legend span:nth-child(3) i{background:#b393ff}
+.controls{display:flex;gap:8px;padding:14px 17px;border-top:1px solid #263341}button{border:1px solid #344858;border-radius:6px;background:#152433;color:#9ab6c6;padding:8px 10px;font:11px inherit;cursor:pointer}button:hover{border-color:#68d6be;color:white}
+aside{padding:18px}h2{font-size:13px;font-weight:500;margin:0 0 15px}.flow{font:11px monospace;line-height:2.6;color:#7d9ba7;padding-bottom:17px;border-bottom:1px solid #293743}.flow b{color:#70dfc1;font-weight:400}.note{padding:16px 0;border-bottom:1px solid #23323e}.note small{font:10px monospace;color:#688b97}.note p{color:#c5d4dd;margin-top:7px}.history{max-height:280px;overflow:auto}
+.chart{height:95px;width:100%;margin-top:8px}.foot{margin-top:18px;display:flex;justify-content:space-between;font:11px monospace;color:#597981;line-height:1.8}.hint{margin-top:15px;padding:15px 18px;border:1px dashed #2e4850;border-radius:8px;font-size:12px;color:#8db3b4}
+@media(max-width:1000px){.grid{grid-template-columns:1fr}.history{max-height:200px}.logo span{display:none}.intro{align-items:start;gap:10px}.tag{white-space:nowrap}main{padding:18px}.metric{padding:12px}.metric b{font-size:20px}}@media(max-width:550px){.metrics{grid-template-columns:1fr 1fr}h1{font-size:21px}.tag{display:none}.foot{display:block}}
+</style>
+<header><div class="logo">FLOW<span>AI RUNTIME / EXPERIMENT 02</span></div><div id="status">● CONNECTING</div></header>
+<main><div class="intro"><div><h1>实时粒子风洞</h1><p>Python 持续计算 · AI 在线干预 · 浏览器即时观察</p></div><span class="tag">LIVE COMPUTATION</span></div>
+<div class="metrics"><div class="metric"><label>模拟粒子</label><b id="count">—</b><small>PARTICLES</small></div><div class="metric"><label>平均速度</label><b id="speed">—</b><small>u/s</small></div><div class="metric"><label>Python 单步耗时</label><b id="cost">—</b><small>ms</small></div><div class="metric"><label>模拟时间</label><b id="elapsed">—</b><small>s</small></div></div>
+<div class="grid"><section class="panel"><div class="bar"><span>01 / VECTOR FIELD</span><strong id="wind">等待 Python 状态</strong></div><div class="canvas-wrap"><canvas id="field"></canvas></div><div class="legend"><span><i></i>PARTICLE</span><span><i></i>OBSTACLE</span><span><i></i>VORTEX</span></div><div class="controls"><button id="trail">轨迹：开</button><button id="vectors">风向网格：开</button><button id="pause">冻结观察</button></div><div class="bar"><span>02 / MEAN VELOCITY HISTORY</span><strong id="frame">TICK —</strong></div><canvas class="chart" id="chart"></canvas></section>
+<aside class="panel"><h2>正在发生什么</h2><div class="flow"><b>AI / MCP</b> 修改实验<br>↓<br><b>PYTHON KERNEL</b> 30 Hz 模拟<br>↓<br><b>WEBSOCKET</b> 持续推送位置<br>↓<br><b>CANVAS</b> 轨迹与数据可视化</div><h2 style="margin-top:20px">AI 操作记录</h2><div id="history" class="history"></div></aside></div>
+<div class="hint">试着对我说：“加入两个反向旋涡”“把风向转向右上方”“移走障碍物”——无需刷新，当前模拟会继续演化。</div>
+<div class="foot"><span>局部粒子场演示 · 非工程 CFD 求解器</span><span id="network">等待第一帧…</span></div></main>
+<script>
+const $=id=>document.getElementById(id),canvas=$('field'),ctx=canvas.getContext('2d'),chart=$('chart'),cc=chart.getContext('2d');
+let state=null,previous=null,historyCommand=-1,trail=true,vectors=true,frozen=false,series=[],received=0,lastReceived=0,online=false,retry=500;
+let w=1,h=1,cw=1,ch=1;
+function size(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);w=r.width;h=r.height;canvas.width=w*d;canvas.height=h*d;ctx.setTransform(d,0,0,d,0,0);const cr=chart.getBoundingClientRect();cw=cr.width;ch=cr.height;chart.width=cw*d;chart.height=ch*d;cc.setTransform(d,0,0,d,0,0);previous=null}
+new ResizeObserver(size).observe(canvas.parentElement);
+$('trail').onclick=()=>{trail=!trail;$('trail').textContent='轨迹：'+(trail?'开':'关')};
+$('vectors').onclick=()=>{vectors=!vectors;$('vectors').textContent='风向网格：'+(vectors?'开':'关')};
+$('pause').onclick=()=>{frozen=!frozen;previous=null;$('pause').textContent=frozen?'继续观察':'冻结观察';if(!frozen&&state)draw(state)};
+function connect(){
+ const token=location.hash.slice(1);if(!token){$('status').textContent='缺少预览凭证';return}
+ const ws=new WebSocket('ws://'+location.host+'/ws');
+ ws.onopen=()=>ws.send(JSON.stringify({token}));
+ ws.onmessage=e=>{const data=JSON.parse(e.data);state=data.state;online=true;retry=500;received++;lastReceived=performance.now();$('status').textContent='● LIVE / 已连接';$('status').style.color='#6bdfba';
+  $('count').textContent=state.points.length;$('speed').textContent=state.mean_speed.toFixed(1);$('cost').textContent=state.compute_ms.toFixed(2);$('elapsed').textContent=state.elapsed.toFixed(1);
+  $('wind').textContent='WIND ['+state.wind.join(', ')+']';$('frame').textContent='TICK '+state.tick+(state.paused?' / PYTHON PAUSED':'');
+  if(state.command!==historyCommand){historyCommand=state.command;$('history').replaceChildren();for(const item of [...data.history].reverse()){const div=document.createElement('div');div.className='note';const sm=document.createElement('small');sm.textContent='#'+item.revision+' · '+new Date(item.time*1000).toLocaleTimeString();const p=document.createElement('p');p.textContent=item.message;div.append(sm,p);$('history').append(div)}}
+  if(!frozen){series.push(state.mean_speed);if(series.length>240)series.shift();draw(state);drawChart()}
+ };
+ ws.onclose=e=>{online=false;$('status').style.color='#efbb71';$('status').textContent=e.code===1008?'凭证无效':'○ OFFLINE / 正在重连';if(e.code!==1008){setTimeout(connect,retry);retry=Math.min(5000,retry*2)}};
+ ws.onerror=()=>ws.close();
+}
+function draw(s){
+ const sx=w/1000,sy=h/600;ctx.globalCompositeOperation='source-over';ctx.fillStyle=trail?'rgba(9,17,26,.16)':'#09111a';ctx.fillRect(0,0,w,h);
+ if(vectors){ctx.strokeStyle='rgba(87,145,155,.16)';ctx.lineWidth=.6;
+  for(let x=45;x<1000;x+=70)for(let y=40;y<600;y+=70){let fx=s.wind[0],fy=s.wind[1];for(const [ox,oy,p]of s.vortices){const dx=x-ox,dy=y-oy,f=Math.exp(-(dx*dx+dy*dy)/(2*155**2));fx-=dy/100*p*f;fy+=dx/100*p*f}const a=Math.atan2(fy,fx),len=14;ctx.beginPath();ctx.moveTo(x*sx,y*sy);ctx.lineTo((x+Math.cos(a)*len)*sx,(y+Math.sin(a)*len)*sy);ctx.lineTo((x+Math.cos(a)*len-Math.cos(a-.6)*5)*sx,(y+Math.sin(a)*len-Math.sin(a-.6)*5)*sy);ctx.stroke()}
+ }
+ for(const [x,y,r]of s.obstacles){ctx.fillStyle='#162530';ctx.strokeStyle='#b58d56';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(x*sx,y*sy,r*sx,r*sy,0,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='#caab7c';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText('SOLID',x*sx,y*sy+3)}
+ for(const [x,y,p]of s.vortices){ctx.strokeStyle='rgba(175,141,255,.5)';ctx.lineWidth=1;ctx.setLineDash([4,6]);ctx.beginPath();ctx.ellipse(x*sx,y*sy,80*sx,80*sy,0,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#c5aaff';ctx.font='20px sans-serif';ctx.textAlign='center';ctx.fillText(p>0?'↻':'↺',x*sx,y*sy+6)}
+ ctx.globalCompositeOperation='lighter';
+ for(let i=0;i<s.points.length;i++){const [x,y,vx,vy]=s.points[i],speed=Math.hypot(vx,vy);ctx.strokeStyle='hsla('+(165+Math.min(speed,260)*.22)+',85%,70%,.85)';ctx.lineWidth=1.25;ctx.beginPath();const old=previous&&previous[i];if(old&&Math.abs(old[0]-x)<70&&Math.abs(old[1]-y)<70)ctx.moveTo(old[0]*sx,old[1]*sy);else ctx.moveTo((x-vx*.018)*sx,(y-vy*.018)*sy);ctx.lineTo(x*sx,y*sy);ctx.stroke()}
+ ctx.globalCompositeOperation='source-over';previous=s.points;
+}
+function drawChart(){cc.clearRect(0,0,cw,ch);if(series.length<2)return;const max=Math.max(150,...series)*1.1;cc.strokeStyle='#5edcba';cc.lineWidth=1.4;cc.beginPath();series.forEach((v,i)=>{let x=i/239*cw,y=ch-12-v/max*(ch-22);i?cc.lineTo(x,y):cc.moveTo(x,y)});cc.stroke()}
+setInterval(()=>{$('network').textContent='收到 '+received+' 帧 / '+(lastReceived?Math.round(performance.now()-lastReceived)+'ms 前更新':'等待中')+(frozen?' / 观察已冻结，Python 仍在运行':'')},300);
+connect();
+</script></html>
