@@ -17,11 +17,13 @@ def main():
         if os.name != 'nt':
             token_file.chmod(0o600)
     token = token_file.read_text(encoding='utf-8').strip()
-    print(f'Trusted local mode; token file: {token_file}', flush=True)
-    print(f'API documentation: http://127.0.0.1:{args.port}/docs', flush=True)
     import uvicorn
+    from .observability import configure_logging, LOGGER
+    configure_logging(include_server=True)
+    LOGGER.info("Trusted local mode; token file: %s", token_file)
+    LOGGER.info("API documentation: http://127.0.0.1:%s/docs", args.port)
     from .api import create_app
-    uvicorn.run(create_app(root, token), host='127.0.0.1', port=args.port)
+    uvicorn.run(create_app(root, token), host='127.0.0.1', port=args.port, log_config=None)
 
 
 if __name__ == '__main__':

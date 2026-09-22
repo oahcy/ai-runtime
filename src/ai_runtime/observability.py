@@ -10,13 +10,26 @@ MIME = 'application/vnd.ai-runtime.log+json'
 SENSITIVE = re.compile(r'password|passwd|secret|token|authorization|api[_-]?key', re.I)
 
 
-def configure_logging():
+class ConsoleFormatter(logging.Formatter):
+    def format(self, record):
+        record.source = {"ai_runtime": "runtime", "uvicorn": "server", "uvicorn.error": "server", "uvicorn.access": "http"}.get(record.name, record.name)
+        return super().format(record)
+
+
+def configure_logging(include_server=False):
     if not any(getattr(h, '_runtime_handler', False) for h in LOGGER.handlers):
         handler = logging.StreamHandler(sys.stderr)
         handler._runtime_handler = True
-        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s [runtime] %(message)s', '%H:%M:%S'))
+        handler.setFormatter(ConsoleFormatter('%(asctime)s %(levelname)-7s [%(source)s] %(message)s', '%H:%M:%S'))
         LOGGER.addHandler(handler)
     LOGGER.setLevel(logging.INFO)
+    if include_server:
+        handler = next(h for h in LOGGER.handlers if getattr(h, "_runtime_handler", False))
+        for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            logger = logging.getLogger(name)
+            logger.handlers = [handler]
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
 
 
 def clean(value):
