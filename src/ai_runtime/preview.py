@@ -3,6 +3,8 @@ import asyncio
 import copy
 import json
 import secrets
+import re
+from .preview_client import CLIENT_JS
 import socket
 import threading
 import time
@@ -11,12 +13,10 @@ DEFAULT_HTML = """<!doctype html><meta charset="utf-8"><title>Runtime state prev
 <style>body{background:#0c1421;color:#cce6e9;font:15px monospace;padding:30px}pre{white-space:pre-wrap}</style>
 <h1>Live state</h1><p id="status">Connecting…</p><pre id="state"></pre>
 <script>
-function connect(){const ws=new WebSocket('ws://'+location.host+'/ws');
-ws.onopen=()=>ws.send(JSON.stringify({token:location.hash.slice(1)}));
-ws.onmessage=e=>{document.getElementById('status').textContent='Connected';
-document.getElementById('state').textContent=JSON.stringify(JSON.parse(e.data),null,2)};
-ws.onclose=e=>{document.getElementById('status').textContent=e.code===1008?'Invalid credential':'Disconnected';
-if(e.code!==1008)setTimeout(connect,1500)};ws.onerror=()=>ws.close()}connect();
+RuntimePreview.onStatus(status => document.getElementById('status').textContent = status);
+RuntimePreview.subscribe((state, meta) => {
+document.getElementById('state').textContent=JSON.stringify({state, ...meta}, null, 2);
+});
 </script>"""
 
 
@@ -53,6 +53,16 @@ class Preview:
             self._history = self._history[-30:]
         return self.snapshot()
 
+    def publish(self, state):
+        """Replace a complete JSON frame, without recording per-frame history."""
+        if not isinstance(state, dict):
+            raise ValueError('state must be a JSON object')
+        detached = json.loads(json.dumps(state, allow_nan=False))
+        with self._lock:
+            self._state = detached
+            self._revision += 1
+            return self._revision
+
     def _app(self):
         from fastapi import FastAPI, WebSocket, WebSocketDisconnect
         from fastapi.responses import HTMLResponse
@@ -62,7 +72,11 @@ class Preview:
 
         @app.get('/')
         async def page():
-            html = self._html
+            # Install the public client API before any plugin script executes.
+            bootstrap = '<script>' + CLIENT_JS + '</script>'
+            first_script = re.search(r'<script\b', self._html, re.IGNORECASE)
+            index = first_script.start() if first_script else len(self._html)
+            html = self._html[:index] + bootstrap + self._html[index:]
             return HTMLResponse(html, headers={
                 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
                 'X-Content-Type-Options': 'nosniff',
@@ -148,6 +162,7 @@ class Preview:
 
 _default = Preview()
 start = _default.start
+publish = _default.publish
 update = _default.update
 snapshot = _default.snapshot
 info = _default.info

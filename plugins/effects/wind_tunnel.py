@@ -8,9 +8,9 @@ from pathlib import Path
 from ai_runtime.preview import Preview
 
 
-class WindTunnel(Preview):
+class WindTunnel:
     def __init__(self, count=600, seed=42):
-        super().__init__(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
+        self._view = Preview(html=Path(__file__).with_name('wind.html').read_text(encoding="utf-8"))
         if not isinstance(count, int) or not 10 <= count <= 1500:
             raise ValueError('count must be an integer between 10 and 1500')
         rng = random.Random(seed)
@@ -24,15 +24,16 @@ class WindTunnel(Preview):
         self.compute_ms = 0
         self._stop = threading.Event()
         self._physics = None
-        self._history = []
+        self._lock = threading.Lock()
+        self._commands = []
         self._command = 0
         self._note('风洞启动：恒定水平风，观察粒子绕过中央障碍物')
         self._publish()
 
     def _note(self, text):
         self._command += 1
-        self._history.append(dict(revision=self._command,message=text,time=time.time()))
-        self._history = self._history[-20:]
+        self._commands.append(dict(revision=self._command,message=text,time=time.time()))
+        self._commands = self._commands[-20:]
 
     def configure(self, *, wind=None, vortices=None, obstacles=None, paused=None, message='调整实验参数'):
         # Validate entire command before changing live state.
@@ -89,16 +90,18 @@ class WindTunnel(Preview):
 
     def _publish(self):
         speeds=[math.hypot(p[2],p[3]) for p in self.points]
-        self._state=dict(points=[[round(v,2) for v in p] for p in self.points],
+        state=dict(points=[[round(v,2) for v in p] for p in self.points],
             wind=list(self.wind), vortices=copy.deepcopy(self.vortices),
             obstacles=copy.deepcopy(self.obstacles),tick=self.tick,paused=self.paused,
             elapsed=round(self.tick/30,1),mean_speed=round(sum(speeds)/len(speeds),1),
-            crossings=self.crossings,compute_ms=round(self.compute_ms,2),command=self._command)
-        self._revision+=1
+            crossings=self.crossings,compute_ms=round(self.compute_ms,2),command=self._command,commands=copy.deepcopy(self._commands))
+        self._view.publish(state)
 
     def snapshot(self):
-        with self._lock:
-            return dict(revision=self._revision,state=copy.deepcopy(self._state),history=copy.deepcopy(self._history))
+        return self._view.snapshot()
+
+    def info(self):
+        return self._view.info()
 
     def _run(self):
         deadline=time.monotonic()
@@ -115,7 +118,7 @@ class WindTunnel(Preview):
             self._stop.wait(delay)
 
     def start(self,port=0):
-        info=super().start(port)
+        info=self._view.start(port)
         if not self._physics or not self._physics.is_alive():
             self._stop.clear()
             self._physics=threading.Thread(target=self._run,daemon=True,name='wind-physics')
@@ -125,4 +128,4 @@ class WindTunnel(Preview):
     def stop(self):
         self._stop.set()
         if self._physics: self._physics.join(3)
-        super().stop()
+        self._view.stop()

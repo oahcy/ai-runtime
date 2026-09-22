@@ -14,31 +14,29 @@ aside{padding:18px}h2{font-size:13px;font-weight:500;margin:0 0 15px}.flow{font:
 <main><div class="intro"><div><h1>实时粒子风洞</h1><p>Python 持续计算 · AI 在线干预 · 浏览器即时观察</p></div><span class="tag">LIVE COMPUTATION</span></div>
 <div class="metrics"><div class="metric"><label>模拟粒子</label><b id="count">—</b><small>PARTICLES</small></div><div class="metric"><label>平均速度</label><b id="speed">—</b><small>u/s</small></div><div class="metric"><label>Python 单步耗时</label><b id="cost">—</b><small>ms</small></div><div class="metric"><label>模拟时间</label><b id="elapsed">—</b><small>s</small></div></div>
 <div class="grid"><section class="panel"><div class="bar"><span>01 / VECTOR FIELD</span><strong id="wind">等待 Python 状态</strong></div><div class="canvas-wrap"><canvas id="field"></canvas></div><div class="legend"><span><i></i>PARTICLE</span><span><i></i>OBSTACLE</span><span><i></i>VORTEX</span></div><div class="controls"><button id="trail">轨迹：开</button><button id="vectors">风向网格：开</button><button id="pause">冻结观察</button></div><div class="bar"><span>02 / MEAN VELOCITY HISTORY</span><strong id="frame">TICK —</strong></div><canvas class="chart" id="chart"></canvas></section>
-<aside class="panel"><h2>正在发生什么</h2><div class="flow"><b>AI / MCP</b> 修改实验<br>↓<br><b>PYTHON KERNEL</b> 30 Hz 模拟<br>↓<br><b>WEBSOCKET</b> 持续推送位置<br>↓<br><b>CANVAS</b> 轨迹与数据可视化</div><h2 style="margin-top:20px">AI 操作记录</h2><div id="history" class="history"></div></aside></div>
+<aside class="panel"><h2>正在发生什么</h2><div class="flow"><b>AI / MCP</b> 修改实验<br>↓<br><b>PYTHON KERNEL</b> 30 Hz 模拟<br>↓<br><b>RUNTIME PREVIEW</b> 实时同步状态<br>↓<br><b>CANVAS</b> 轨迹与数据可视化</div><h2 style="margin-top:20px">AI 操作记录</h2><div id="history" class="history"></div></aside></div>
 <div class="hint">试着对我说：“加入两个反向旋涡”“把风向转向右上方”“移走障碍物”——无需刷新，当前模拟会继续演化。</div>
 <div class="foot"><span>局部粒子场演示 · 非工程 CFD 求解器</span><span id="network">等待第一帧…</span></div></main>
 <script>
 const $=id=>document.getElementById(id),canvas=$('field'),ctx=canvas.getContext('2d'),chart=$('chart'),cc=chart.getContext('2d');
-let state=null,previous=null,historyCommand=-1,trail=true,vectors=true,frozen=false,series=[],received=0,lastReceived=0,online=false,retry=500;
+let state=null,previous=null,historyCommand=-1,trail=true,vectors=true,frozen=false,series=[],received=0,lastReceived=0,online=false;
 let w=1,h=1,cw=1,ch=1;
 function size(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);w=r.width;h=r.height;canvas.width=w*d;canvas.height=h*d;ctx.setTransform(d,0,0,d,0,0);const cr=chart.getBoundingClientRect();cw=cr.width;ch=cr.height;chart.width=cw*d;chart.height=ch*d;cc.setTransform(d,0,0,d,0,0);previous=null}
 new ResizeObserver(size).observe(canvas.parentElement);
 $('trail').onclick=()=>{trail=!trail;$('trail').textContent='轨迹：'+(trail?'开':'关')};
 $('vectors').onclick=()=>{vectors=!vectors;$('vectors').textContent='风向网格：'+(vectors?'开':'关')};
 $('pause').onclick=()=>{frozen=!frozen;previous=null;$('pause').textContent=frozen?'继续观察':'冻结观察';if(!frozen&&state)draw(state)};
-function connect(){
- const token=location.hash.slice(1);if(!token){$('status').textContent='缺少预览凭证';return}
- const ws=new WebSocket('ws://'+location.host+'/ws');
- ws.onopen=()=>ws.send(JSON.stringify({token}));
- ws.onmessage=e=>{const data=JSON.parse(e.data);state=data.state;online=true;retry=500;received++;lastReceived=performance.now();$('status').textContent='● LIVE / 已连接';$('status').style.color='#6bdfba';
+RuntimePreview.onStatus(value=>{
+ online=value==='connected';$('status').style.color=online?'#6bdfba':'#efbb71';
+ $('status').textContent=online?'● LIVE / 已连接':value==='unauthorized'?'凭证无效':'○ OFFLINE / 正在连接';
+});
+RuntimePreview.subscribe(next=>{
+ state=next;received++;lastReceived=performance.now();
   $('count').textContent=state.points.length;$('speed').textContent=state.mean_speed.toFixed(1);$('cost').textContent=state.compute_ms.toFixed(2);$('elapsed').textContent=state.elapsed.toFixed(1);
   $('wind').textContent='WIND ['+state.wind.join(', ')+']';$('frame').textContent='TICK '+state.tick+(state.paused?' / PYTHON PAUSED':'');
-  if(state.command!==historyCommand){historyCommand=state.command;$('history').replaceChildren();for(const item of [...data.history].reverse()){const div=document.createElement('div');div.className='note';const sm=document.createElement('small');sm.textContent='#'+item.revision+' · '+new Date(item.time*1000).toLocaleTimeString();const p=document.createElement('p');p.textContent=item.message;div.append(sm,p);$('history').append(div)}}
+  if(state.command!==historyCommand){historyCommand=state.command;$('history').replaceChildren();for(const item of [...state.commands].reverse()){const div=document.createElement('div');div.className='note';const sm=document.createElement('small');sm.textContent='#'+item.revision+' · '+new Date(item.time*1000).toLocaleTimeString();const p=document.createElement('p');p.textContent=item.message;div.append(sm,p);$('history').append(div)}}
   if(!frozen){series.push(state.mean_speed);if(series.length>240)series.shift();draw(state);drawChart()}
- };
- ws.onclose=e=>{online=false;$('status').style.color='#efbb71';$('status').textContent=e.code===1008?'凭证无效':'○ OFFLINE / 正在重连';if(e.code!==1008){setTimeout(connect,retry);retry=Math.min(5000,retry*2)}};
- ws.onerror=()=>ws.close();
-}
+});
 function draw(s){
  const sx=w/1000,sy=h/600;ctx.globalCompositeOperation='source-over';ctx.fillStyle=trail?'rgba(9,17,26,.16)':'#09111a';ctx.fillRect(0,0,w,h);
  if(vectors){ctx.strokeStyle='rgba(87,145,155,.16)';ctx.lineWidth=.6;
@@ -52,5 +50,5 @@ function draw(s){
 }
 function drawChart(){cc.clearRect(0,0,cw,ch);if(series.length<2)return;const max=Math.max(150,...series)*1.1;cc.strokeStyle='#5edcba';cc.lineWidth=1.4;cc.beginPath();series.forEach((v,i)=>{let x=i/239*cw,y=ch-12-v/max*(ch-22);i?cc.lineTo(x,y):cc.moveTo(x,y)});cc.stroke()}
 setInterval(()=>{$('network').textContent='收到 '+received+' 帧 / '+(lastReceived?Math.round(performance.now()-lastReceived)+'ms 前更新':'等待中')+(frozen?' / 观察已冻结，Python 仍在运行':'')},300);
-connect();
+
 </script></html>

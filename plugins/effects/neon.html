@@ -27,7 +27,7 @@ h2{font-weight:500;font-size:15px;margin:0 0 10px}.help{font-size:12px;line-heig
 const $=id=>document.getElementById(id);
 let state={hue:190,speed:.65,particles:650,glow:.8,rings:5,spread:1,title:"NEON SINGULARITY"};
 let revision=-1,paused=false,phase=0,last=performance.now(),fps=60,connected=false;
-const token=location.hash.slice(1),canvas=$('scene'),ctx=canvas.getContext('2d');
+const canvas=$('scene'),ctx=canvas.getContext('2d');
 let width=1,height=1,dpr=1,mx=0,my=0,tx=0,ty=0;
 function resize(){const r=canvas.parentElement.getBoundingClientRect();width=r.width;height=r.height;dpr=Math.min(devicePixelRatio||1,2);canvas.width=width*dpr;canvas.height=height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
 new ResizeObserver(resize).observe(canvas.parentElement);
@@ -35,13 +35,9 @@ canvas.addEventListener('pointermove',e=>{const r=canvas.getBoundingClientRect()
 canvas.addEventListener('pointerleave',()=>{tx=ty=0});
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'继续动画':'暂停动画'};
 function status(text,ok){$('connection').textContent=(ok?'● ':'○ ')+text;$('connection').classList.toggle('connected',ok);connected=ok}
-let retry=500;
-function connect(){
- if(!token){status('缺少预览凭证，请使用 Python 返回的完整链接',false);return}
- const ws=new WebSocket('ws://'+location.host+'/ws');
- ws.onopen=()=>ws.send(JSON.stringify({token}));
- ws.onmessage=e=>{
-  const data=JSON.parse(e.data);state=data.state;revision=data.revision;retry=500;status('已连接 · 实时同步',true);
+RuntimePreview.onStatus(value=>status(value==='connected'?'已连接 · 实时同步':value==='unauthorized'?'预览凭证无效':'正在连接',value==='connected'));
+RuntimePreview.subscribe((next, data)=>{
+ state=next;revision=data.revision;
   $('title').textContent=state.title;
   for(const id of ['particles','hue'])$(''+id).textContent=state[id];
   $('speed').textContent=Number(state.speed).toFixed(2)+'×';$('revision').textContent=String(revision).padStart(2,'0');
@@ -53,11 +49,7 @@ function connect(){
    const changes=document.createElement('code');changes.textContent=Object.entries(item.changes).map(([k,v])=>k+' → '+v).join(' · ');
    row.append(time,text,changes);$('history').append(row);
   }
- };
- ws.onclose=e=>{if(e.code===1008){status('预览凭证无效，请重新获取链接',false);return}status('连接断开 · 正在重连',false);setTimeout(connect,retry);retry=Math.min(retry*2,5000)};
- ws.onerror=()=>ws.close();
-}
-connect();
+});
 let seed=81;function rand(){seed=(seed*1664525+1013904223)>>>0;return seed/4294967296}
 const dots=Array.from({length:2000},()=>({a:rand()*Math.PI*2,r:.42+rand()*.9,z:rand(),size:.5+rand()*1.5}));
 const stars=Array.from({length:180},()=>({x:rand(),y:rand(),v:rand()}));

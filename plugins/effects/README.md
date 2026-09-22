@@ -5,7 +5,7 @@
 
 两个 scene：
 - neon：浏览器计算动画，Python 修改参数。
-- wind：Python 后台计算粒子运动，WebSocket 持续推送。
+- wind：Python 后台计算粒子运动，通过 Preview.publish 发布状态。
 
 先注册本目录，再在任意 cwd 的 Runtime 会话使用 runtime.plugins.load("effects")。
 
@@ -20,3 +20,5 @@ unload effects 会关闭两个场景。网页自身的暂停/冻结按钮只暂�
 本插件是效果与功能验证示例，风洞不是工程 CFD 求解器。
 
 调用示例：[examples/basic.py](examples/basic.py)，在 Runtime kernel 中执行其内容。
+
+实时同步统一使用 Runtime Preview：Python 发布数据，页面通过 RuntimePreview.subscribe 订阅。插件不处理 WebSocket、凭证或重连。风洞操作记录作为业务数据 state.commands 发布。

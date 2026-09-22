@@ -92,7 +92,7 @@ async def test_effects_real_preview_and_cleanup(tmp_path):
                     assert changed['state']['points'] != first['state']['points']
         objects = list(fx._instance.scenes.values())
         m.unload('effects')
-        assert all(obj._thread is None for obj in objects)
+        assert all(obj.info()['running'] is False for obj in objects)
         assert all(not getattr(obj, '_physics', None) or not obj._physics.is_alive() for obj in objects)
         async with httpx.AsyncClient(trust_env=False, timeout=1) as client:
             for url in urls:

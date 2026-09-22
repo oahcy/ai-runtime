@@ -25,11 +25,44 @@ view = Preview(
 )
 ```
 
-html 为可信本机代码，在实例创建时读取，不自动热替换。只提供根页面，不托管任意文件目录。
-浏览器连接同源 /ws，第一条消息发送 {"token": location.hash.slice(1)}。
-服务端返回 {revision, state, history}；history 中每条含 revision、message、changes、time。
-收到消息后使用 state 更新自己的界面。update 按顶层键合并 JSON，嵌套对象整体替换；拒绝 NaN/Infinity 等非 JSON 值。
-状态与更新参数复制后保存，调用方修改嵌套对象不会隐式改变已发布数据。
+html 为可信本机代码，在实例创建时读取，不自动热替换。Runtime 自动在页面脚本前注入客户端接口，只提供根页面，不托管任意文件目录。
+
+## 插件只发布数据
+
+~~~python
+from ai_runtime.preview import Preview
+view = Preview(html=html, state={"score": 0})
+view.start()
+view.publish({"score": 42})  # 原子替换完整状态，返回 revision；适合逐帧更新
+view.update(score=43, message="得分变化")  # 顶层合并，并记录操作历史
+view.stop()
+~~~
+
+publish 不记录逐帧历史，避免大帧数据累积；update 保留最近 30 条操作记录。两者验证 JSON、拒绝 NaN/Infinity、复制嵌套值，调用者后续修改原数据不会改变已发布内容。插件无需继承 Preview 或访问内部锁、状态与版本字段。
+
+## 页面只订阅状态
+
+~~~html
+<script>
+const unsubscribe = RuntimePreview.subscribe((state, meta) => {
+  render(state); // 插件自己的绘制函数
+  // meta.revision、meta.history 可用于显示版本和操作记录
+});
+const unsubscribeStatus = RuntimePreview.onStatus(status => {
+  // idle / connecting / connected / disconnected / unauthorized
+  document.getElementById("status").textContent = status;
+});
+// 不再需要预览时分别调用 unsubscribe()、unsubscribeStatus()
+</script>
+~~~
+
+接口在插件脚本运行前可用；首次订阅自动连接，多个订阅共享连接，最后一个订阅取消后停止连接。订阅后立即回放缓存的最近状态（如有）；回调失败不会阻止其他订阅者接收。回调中的数据请视为只读。
+
+WebSocket 地址、凭证读取、鉴权、消息解析、断线重连由 Runtime 管理，插件页面不写这些逻辑。无效凭证停止重试，换用有效链接可重新连接。连接恢复后接收完整最新状态，不回放每一帧；高频更新可能合并。该接口只读，页面交互若只影响本地显示无需回传；尚未提供浏览器调用 Python 的接口。
+
+## 传输实现（Runtime 内部）
+
+当前使用同源 WebSocket，校验 Origin 和链接凭证。传输仍然能在浏览器 Network 中看到；“插件不可见”指插件不依赖协议实现，并不是隐藏网络流量。以后可替换传输实现而保持 publish / subscribe 不变。
 
 ## 示例
 

@@ -41,7 +41,8 @@ async def test_real_websocket_updates_reconnect_and_auth():
             response = await client.get(base)
             assert response.status_code == 200
             assert token not in response.text
-            assert response.text == '<h1>Custom preview</h1>'
+            assert '<h1>Custom preview</h1>' in response.text
+            assert 'globalThis.RuntimePreview' in response.text
             assert 'no-store' in response.headers['cache-control']
         async with websockets.connect(ws_url, origin=origin) as ws:
             await ws.send(json.dumps({'token': token}))
@@ -71,3 +72,31 @@ async def test_real_websocket_updates_reconnect_and_auth():
         p.stop()
     assert p.info()['running'] is False
     assert p.info()['url'] is None
+
+def test_publish_replaces_frame_atomically_without_history():
+    p = Preview(state={'old': 1})
+    value = {'points': [[1, 2]]}
+    assert p.publish(value) == 1
+    value['points'][0][0] = 9
+    assert p.snapshot() == {'revision': 1, 'state': {'points': [[1, 2]]}, 'history': []}
+    with pytest.raises(ValueError):
+        p.publish({'invalid': math.nan})
+    assert p.snapshot()['revision'] == 1
+    p.update(message='changed', label='ok')
+    p.publish({'points': []})
+    assert p.snapshot()['state'] == {'points': []}
+    assert len(p.snapshot()['history']) == 1
+
+
+def test_browser_subscription_reconnect_and_auth(tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+    from ai_runtime.preview_client import CLIENT_JS
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node required for browser client unit test')
+    harness = Path(__file__).with_name('preview_client_harness.js').read_text(encoding='utf-8')
+    script = tmp_path / 'client-test.js'
+    script.write_text(harness.replace('/* CLIENT */', CLIENT_JS), encoding='utf-8')
+    subprocess.run([node, str(script)], check=True, capture_output=True, text=True, timeout=10)
