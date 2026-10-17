@@ -2,7 +2,7 @@
 
 供 AI 连续调用的本地 Python 执行环境。一个逻辑会话对应一个常驻 IPython kernel；客户端断开不影响会话。
 
-当前为可运行的 v0.1 原型。仅支持可信本机模式，**不是沙箱**。执行代码拥有启动用户的文件、网络与进程权限。
+当前为 v0.1 预览版。仅支持可信本机模式，**不是沙箱**。执行代码拥有启动用户的文件、网络与进程权限。
 
 ## 已实现
 
@@ -19,11 +19,46 @@
 
 ## 安装与运行
 
-需要 Python 3.11+。在项目目录执行：
+需要 Python 3.11+，首次安装需要联网下载依赖。在克隆后的项目目录执行：
+
+### Windows（PowerShell / CMD）
+
+```powershell
+.\script\install.bat
+.\script\start.bat
+```
+
+### macOS（终端）
+
+```bash
+bash script/install.sh
+bash script/start.sh
+```
+
+安装脚本创建或复用项目内 `.venv`，安装核心及 MCP 依赖，并把四个内置插件注册到项目的 `.runtime`。注册不会连接设备或加载插件。重复安装不会删除现有会话数据。更新依赖前请先关闭服务；脚本不会自动重启服务或 kernel。
+
+日常运行只需启动脚本。脚本自动定位项目根目录；服务前台运行，按 Ctrl+C 停止。根目录的 `start.bat` 保留为 Windows 双击启动入口。
+
+可通过 `AI_RUNTIME_PYTHON` 指定 Python 可执行文件的完整路径（不要包含命令参数）：
+
+```powershell
+$env:AI_RUNTIME_PYTHON = 'C:\Python312\python.exe'
+.\script\install.bat --dev
+```
+
+```bash
+AI_RUNTIME_PYTHON=/opt/homebrew/bin/python3.12 bash script/install.sh --dev
+```
+
+`--dev` 额外安装测试依赖。已有 `.venv` 会继续使用原来的 Python；该变量只决定安装器和新虚拟环境使用的 Python。
+启动参数直接透传，例如 `script\start.bat --port 8766` 或 `bash script/start.sh --port 8766`。
+若指定 `--data-dir`，需要在对应数据目录重新注册插件，并调整 MCP 的 token 文件路径。
+
+### 手动安装
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pip install -e ".[mcp]"
 .\.venv\Scripts\python.exe -m ai_runtime --data-dir .runtime --port 8765
 ```
 
@@ -31,7 +66,11 @@ python -m venv .venv
 
 首次启动将生成 `.runtime/token`。在 Swagger 的 Authorize 中输入该文件的内容；Python 客户端自动添加 Bearer 前缀。不要把 token 放进 URL。
 
-本项目已建立 `.venv` 并安装依赖，可直接使用第三条命令。`requirements.lock` 记录本次 Windows/Python 3.12 验证环境的精确依赖版本，可用于重现；它不是跨平台锁文件。
+仓库不包含虚拟环境。`requirements.lock` 记录 Windows/Python 3.12 验证环境的精确依赖版本；它不是跨平台锁文件。
+
+当前建议从源码仓库安装。项目目录下的 `plugins/` 是单独注册的插件，不包含在核心 Python wheel 中；不要把核心 wheel 当作带全部插件的发行包。手动安装时需按下文注册插件；安装脚本已完成默认数据目录的注册。
+
+macOS / Linux 可用 `python3 -m venv .venv`，随后使用 `.venv/bin/python` 替换上述 Python 路径。主要验证环境为 Windows；设备调试还需要可用的目标设备和调试入口。
 
 ## 跨请求保留变量
 
@@ -98,7 +137,7 @@ display(Image(filename='screenshot.png'))
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-测试会启动真实 IPython 子进程，覆盖变量保留、独立会话、失败后继续、输入禁用、超时/中断、未知状态、检查点、产物、鉴权和 WebSocket 回放。
+运行测试前安装 `python -m pip install -e ".[test,mcp]"`。浏览器预览客户端测试需要 Node.js；未安装时该项跳过。测试会启动真实 IPython 子进程，覆盖变量保留、独立会话、失败后继续、输入禁用、超时/中断、未知状态、检查点、产物、鉴权和 WebSocket 回放。
 
 ## 已知边界
 
@@ -107,7 +146,7 @@ display(Image(filename='screenshot.png'))
 - Windows 的部分阻塞调用无法及时响应中断；5 秒内未确认停止则将会话置为 lost、执行置为 unknown，等待显式重建。
 - 单次执行持久化输出预算为 4 MiB，超出后记录 output.truncated；该限制不是网络、内存或磁盘的系统级配额。
 - 暂无自动清理历史、环境依赖快照、桌面适配器、模型调度器、审批系统或远程多用户部署能力。
-- 富媒体产物采用下载方式返回；不在服务中直接执行 HTML/JavaScript 输出。
+- 富媒体产物采用下载方式返回；显式创建的 Preview 可以托管可信 HTML/JavaScript，并在浏览器执行。普通执行输出不会自动作为页面运行。
 
 ## MCP 接入 AI 客户端
 
@@ -130,7 +169,19 @@ Runtime 管理注册清单、会话内加载和生命周期；具体效果与外
 - [应用启动诊断](plugins/chrome-devtools/examples/diagnose_app.py)：先看 ADB 启动日志，再限时探测 DevTools
 - [效果插件调用示例](plugins/effects/examples/basic.py)；设备工具用法见各插件 README。
 
-先注册：`.\.venv\Scripts\python.exe -m ai_runtime.plugins add D:/prj/ai-runtime/plugins/effects`。
+在项目根目录注册需要的插件：
+
+```powershell
+.\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/effects
+.\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/chrome-devtools
+.\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/adb
+.\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/usb-browser
+.\.venv\Scripts\python.exe -m ai_runtime.plugins list
+```
+
+注册命令与服务应使用同一个 `--data-dir`（默认当前目录的 `.runtime`）。插件路径应保持稳定。ADB 插件需要单独安装 Android Platform Tools，并允许设备调试；CDP 插件需要目标已开放调试入口，不会自动开启微信或游戏的调试模式。
+
+发布与验收说明见 [docs/releasing.md](docs/releasing.md)。
 
 ## 关键日志
 

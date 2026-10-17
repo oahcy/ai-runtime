@@ -22,7 +22,7 @@ cd D:\prj\ai-runtime
 .\.venv\Scripts\python.exe -m ai_runtime
 ```
 
-本次开发环境已经安装依赖。若 Runtime 已经运行，可以继续使用，不需要为了 Adapter 重启 kernel。
+请将本文的 `D:/prj/ai-runtime` 替换为实际克隆目录，包括两个配置示例里的 Python 和 token 文件路径。若 Runtime 已经运行，可以继续使用，不需要为了 Adapter 重启 kernel。
 
 ## 2. 配置本地 MCP 客户端
 
