@@ -118,4 +118,5 @@ def test_output_renderer():
         pytest.skip('Node required for output renderer test')
     script = re.search(r'<script>([\s\S]*)</script>', OUTPUT_HTML).group(1)
     subprocess.run([node, str(Path(__file__).with_name('output_preview_harness.js'))],
-                   input=script, text=True, capture_output=True, check=True, timeout=10)
+                   input=script, text=True, encoding='utf-8',
+                   capture_output=True, check=True, timeout=10)
