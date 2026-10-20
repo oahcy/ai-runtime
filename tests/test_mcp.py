@@ -47,7 +47,7 @@ async def test_bridge_auth_error_and_image(tmp_path):
     assert result.content[0].data == PNG
     server = create_server(bridge)
     tools = await server.list_tools()
-    assert len(tools) == 22
+    assert len(tools) == 23
     by_name = {tool.name: tool for tool in tools}
     assert by_name['execute'].annotations.readOnlyHint is False
     assert by_name['read_artifact'].annotations.readOnlyHint is True
@@ -99,12 +99,14 @@ async def test_real_stdio_to_http_to_kernel_and_reconnect(tmp_path):
         async with stdio_client(parameters) as (reader, writer):
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
-                assert len((await client.list_tools()).tools) == 22
+                assert len((await client.list_tools()).tools) == 23
                 plugin_dir = scaffold(tmp_path / 'mcp-plugin', 'mcp-test')
                 unpack(await client.call_tool('add_plugin', {'path': plugin_dir}))
                 assert unpack(await client.call_tool('get_plugin', {'plugin_id': 'mcp-test'}))['id'] == 'mcp-test'
                 assert len(unpack(await client.call_tool('list_plugins', {}))['plugins']) == 1
                 sid = unpack(await client.call_tool('create_session', {'cwd': str(tmp_path)}))['id']
+                view = unpack(await client.call_tool('open_output_preview', {'session_id': sid}))
+                assert '/previews/' in view['url'] and view['session_id'] == sid
                 plugin_job = unpack(await client.call_tool('call_plugin', {'session_id': sid, 'plugin_id': 'mcp-test', 'request_id': 'plugin-ping', 'action': 'ping', 'arguments': {}}))
                 assert unpack(await client.call_tool('wait_execution', {'execution_id': plugin_job['id']}))['status'] == 'succeeded'
                 quick_args = {'session_id':sid,'request_id':'quick','code':"counter=globals().get('counter',0)+1\nprint(counter)",'wait_seconds':5}

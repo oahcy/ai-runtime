@@ -123,6 +123,7 @@ display(Image(filename='screenshot.png'))
 | POST / GET | `/sessions` | 创建 / 列出会话 |
 | GET / DELETE | `/sessions/{id}` | 查询 / 关闭会话 |
 | POST | `/sessions/{id}/restart` | 明确丢弃内存并重建 kernel |
+| POST | `/sessions/{id}/output-preview` | 创建或复用内核输出预览，返回带查看凭证的 URL |
 | POST | `/sessions/{id}/executions` | 提交 `{request_id, code, timeout}`，timeout 单位为秒 |
 | GET | `/executions/{id}` | 读取执行状态 |
 | POST | `/executions/{id}/interrupt` | 中断运行 / 取消排队 |
@@ -146,7 +147,7 @@ display(Image(filename='screenshot.png'))
 - Windows 的部分阻塞调用无法及时响应中断；5 秒内未确认停止则将会话置为 lost、执行置为 unknown，等待显式重建。
 - 单次执行持久化输出预算为 4 MiB，超出后记录 output.truncated；该限制不是网络、内存或磁盘的系统级配额。
 - 暂无自动清理历史、环境依赖快照、桌面适配器、模型调度器、审批系统或远程多用户部署能力。
-- 富媒体产物采用下载方式返回；显式创建的 Preview 可以托管可信 HTML/JavaScript，并在浏览器执行。普通执行输出不会自动作为页面运行。
+- PNG/JPEG、HTML 和文本可在内核输出预览中实时显示；HTML 在禁止脚本的隔离 iframe 内呈现，不支持交互式 widgets。显式创建的 Preview 仍可托管可信 HTML/JavaScript。
 
 ## MCP 接入 AI 客户端
 
@@ -157,6 +158,21 @@ display(Image(filename='screenshot.png'))
 ## 实时预览
 
 通过 `runtime.preview.start()` 打开通用 JSON 状态窗口，再用 `runtime.preview.update(...)` 实时修改状态。自定义界面使用 `Preview(html=..., state=...)`，动画和业务逻辑放在示例中。详见 [Live Preview](docs/live-preview.md)。
+
+### 自动显示内核输出
+
+会话首次调用 `display()`，或返回 PNG/JPEG、HTML 富媒体结果时，Runtime 自动创建名为“内核输出”的预览；它不会自动弹出浏览器。通过 MCP `open_output_preview(session_id)` 获取并打开 URL，也可调用 `POST /sessions/{id}/output-preview`，或在 `GET /previews` 中找到它。纯文本会话可用同一接口主动创建页面。预览页面的外壳可直接访问，实际数据通过 URL 片段中的独立凭证鉴权，不暴露主 API token。
+
+```python
+from IPython.display import display, HTML
+view = display(HTML("<h2>第一次输出</h2>"), display_id=True)
+# 后续执行仍可更新同一块内容，浏览器无需刷新：
+view.update(HTML("<h2>已更新</h2>"))
+```
+
+输出经 IOPub 自动桥接到现有预览 WebSocket。PNG/JPEG 直接从内存发送，不依赖额外导出文件或再次下载产物；原有历史和图片产物仍会保存。支持文本、错误、PNG/JPEG、HTML、JSON，以及跨次执行的 `display_id` 更新。`clear_output(wait=True/False)` 按所属执行清理，不清空其他执行的结果。
+
+每个会话保留最近最多200个输出块，数据预算3 MiB，单块超过1.5 MiB显示省略提示；完整历史仍由执行事件和产物接口查询。页面重连恢复当前内存快照，关闭或重启内核后旧页面失效。HTML 默认隔离脚本和外部资源；动态网页请使用原有 Preview。该面板适合输出检查，不用于高频逐帧视频传输。
 
 ## 插件
 

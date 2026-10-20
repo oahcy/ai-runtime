@@ -95,6 +95,15 @@ def create_server(bridge: Bridge):
         'Use list_plugins/get_plugin to discover local plugins; add_plugin registers a trusted local directory. Plugin load/call/unload run as queued kernel jobs. Use normal Python libraries and the preloaded runtime SDK.'
     ))
 
+    @server.tool(annotations=WRITE)
+    async def open_output_preview(session_id: Identifier) -> dict:
+        """Get a live browser URL for this kernel's display(), images, HTML and text.
+
+        Reuses one viewer per session. Open the returned URL in a browser.
+        Updates and clear_output are automatic; HTML scripts are disabled.
+        """
+        return await bridge.request('POST', f'/sessions/{session_id}/output-preview')
+
     @server.tool(annotations=READ)
     async def list_sessions() -> dict:
         """List Runtime sessions, including availability and kernel generation."""

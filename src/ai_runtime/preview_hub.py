@@ -3,11 +3,13 @@ import asyncio
 import json
 import re
 import secrets
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from .preview import render_html, PAGE_HEADERS
+from .output_preview import OutputBuffer, OUTPUT_HTML
 
 ID = re.compile(r'^[0-9a-f]{32}$')
 
@@ -25,6 +27,8 @@ class PreviewHub:
     def __init__(self):
         self.sessions = {}
         self.views = {}
+        self.outputs = {}
+        self.output_views = {}
 
     def attach(self, sid):
         self.detach(sid)
@@ -34,9 +38,46 @@ class PreviewHub:
 
     def detach(self, sid):
         self.sessions.pop(sid, None)
+        self.outputs.pop(sid, None)
+        self.output_views.pop(sid, None)
         for pid, row in list(self.views.items()):
             if row['sid'] == sid:
                 self.views.pop(pid, None)
+
+    def ensure_output(self, sid):
+        if sid not in self.sessions:
+            raise ValueError('Session is unavailable')
+        pid = self.output_views.get(sid)
+        if pid in self.views:
+            return pid
+        if sum(v['sid'] == sid for v in self.views.values()) >= 16:
+            raise ValueError('Maximum 16 previews per session')
+        pid = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat()
+        buffer = self.outputs.setdefault(sid, OutputBuffer())
+        self.views[pid] = dict(sid=sid, html=OUTPUT_HTML, token=secrets.token_urlsafe(32),
+            name='内核输出', created_at=now, updated_at=now, output=True,
+            snapshot=dict(revision=0, state=buffer.state(), history=[]))
+        self.output_views[sid] = pid
+        return pid
+
+    def output(self, sid, eid, kind, content):
+        if sid not in self.sessions:
+            return
+        buffer = self.outputs.setdefault(sid, OutputBuffer())
+        buffer.apply(eid, kind, content)
+        pid = self.output_views.get(sid)
+        rich_result = kind == 'execute_result' and any(
+            mime in content.get('data', {}) for mime in ('image/png', 'image/jpeg', 'text/html'))
+        if pid is None and (kind == 'display_data' or rich_result):
+            # A full preview quota must not break the kernel's output pump.
+            if sum(v['sid'] == sid for v in self.views.values()) < 16:
+                pid = self.ensure_output(sid)
+        row = self.views.get(pid)
+        if row is not None:
+            row['snapshot'] = dict(revision=row['snapshot']['revision'] + 1,
+                                   state=buffer.state(), history=[])
+            row['updated_at'] = datetime.now(timezone.utc).isoformat()
 
     def list(self, base_url, session_id=None):
         return [
@@ -117,7 +158,10 @@ class PreviewHub:
             row = self.views.get(pid)
             if row is None:
                 raise HTTPException(404, 'Preview unavailable')
-            return HTMLResponse(render_html(row['html']), headers=PAGE_HEADERS)
+            headers = dict(PAGE_HEADERS)
+            if row.get('output'):
+                headers['Content-Security-Policy'] += "; frame-src 'self'"
+            return HTMLResponse(render_html(row['html']), headers=headers)
 
         @app.websocket('/previews/{pid}/ws')
         async def viewer(ws: WebSocket, pid: str):

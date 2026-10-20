@@ -117,6 +117,16 @@ def create_app(root: Path, token: str, *, preview_url: str | None = None):
     async def session(sid: str):
         return app.state.runtime.session(sid)
 
+    @app.post('/sessions/{sid}/output-preview', dependencies=secured, tags=['previews'])
+    async def output_preview(sid: str, request: Request):
+        """Open the bounded live kernel output viewer; repeated calls reuse it."""
+        runtime = app.state.runtime
+        runtime.session(sid)
+        pid = hub.ensure_output(sid)
+        base = runtime.preview_url or str(request.base_url).rstrip('/')
+        item = next(item for item in hub.list(base, sid) if item['id'] == pid)
+        return JSONResponse(item, headers={'Cache-Control': 'no-store'})
+
     @app.delete('/sessions/{sid}', dependencies=secured)
     async def close(sid: str):
         async with app.state.runtime.lifecycle_lock:

@@ -183,6 +183,10 @@ class Runtime:
                 log_event(notice['event'], level=30 if notice['event'].endswith('_failed') else 20, session=sid[:8], execution=eid[:8] if eid else None, details=fields)
                 self.store.event(sid, eid, notice['event'], fields)
                 return
+        # Feed the viewer before converting image bytes into artifact references.
+        # Live display does not depend on writing or fetching an artifact file.
+        if self.preview_hub:
+            self.preview_hub.output(sid, eid, kind, content)
         # Preserve MIME bundles but store binary images separately.
         for mime, suffix in [('image/png', '.png'), ('image/jpeg', '.jpg')]:
             if mime in data:

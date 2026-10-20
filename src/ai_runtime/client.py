@@ -19,6 +19,9 @@ class Client:
     def create_session(self, cwd):
         return self.request('POST', '/sessions', {'cwd': str(cwd)})
 
+    def open_output_preview(self, sid):
+        return self.request('POST', f'/sessions/{sid}/output-preview')
+
     def execute(self, sid, code, *, request_id=None, timeout=30):
         return self.request('POST', f'/sessions/{sid}/executions',
             {'request_id': request_id or uuid.uuid4().hex, 'code': code, 'timeout': timeout})
