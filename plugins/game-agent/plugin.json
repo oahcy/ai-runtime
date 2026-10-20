@@ -1,0 +1,43 @@
+{
+  "id": "game-agent",
+  "name": "小游戏 Agent",
+  "version": "0.2.0",
+  "api_version": 1,
+  "description": "小游戏对象操作与日志通道；随包加载，无 eval，非 CDP。",
+  "entry": "plugin.py",
+  "actions": {
+    "start": {
+      "description": "Start listener and return config plus require loader for bundled agent.js",
+      "parameters": {
+        "host": "local LAN IPv4 or 127.0.0.1 (default); no wildcard",
+        "port": "0..65535 default 0"
+      }
+    },
+    "pair": {
+      "description": "Rotate pairing token and generate a new loader; existing connections remain",
+      "parameters": {}
+    },
+    "status": {
+      "description": "List explicit target IDs; no credentials",
+      "parameters": {}
+    },
+    "events": {
+      "description": "Read bounded logs and connection events",
+      "parameters": {
+        "after": "sequence cursor, default 0"
+      }
+    },
+    "stop": {
+      "description": "Close listener, connections and pending requests",
+      "parameters": {}
+    },
+    "operate": {
+      "description": "Operate on registered roots and object handles without eval. Timeout has unknown outcome; do not replay.",
+      "parameters": {
+        "target_id": "required target ID",
+        "command": "JSON: op roots/get/set/call/keys/release; object handle, property/method, args/value envelopes as applicable",
+        "timeout": "0.1..30 seconds, default 5"
+      }
+    }
+  }
+}

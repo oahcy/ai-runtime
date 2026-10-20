@@ -35,7 +35,7 @@ bash script/install.sh
 bash script/start.sh
 ```
 
-安装脚本创建或复用项目内 `.venv`，安装核心及 MCP 依赖，并把四个内置插件注册到项目的 `.runtime`。注册不会连接设备或加载插件。重复安装不会删除现有会话数据。更新依赖前请先关闭服务；脚本不会自动重启服务或 kernel。
+安装脚本创建或复用项目内 `.venv`，安装核心及 MCP 依赖，并把五个内置插件注册到项目的 `.runtime`。注册不会连接设备或加载插件。重复安装不会删除现有会话数据。更新依赖前请先关闭服务；脚本不会自动重启服务或 kernel。
 
 日常运行只需启动脚本。脚本自动定位项目根目录；服务前台运行，按 Ctrl+C 停止。根目录的 `start.bat` 保留为 Windows 双击启动入口。
 
@@ -166,6 +166,7 @@ Runtime 管理注册清单、会话内加载和生命周期；具体效果与外
 - [effects 效果测试插件](plugins/effects/README.md)：霓虹与风洞
 - [chrome-devtools 调试插件](plugins/chrome-devtools/README.md)：持久 CDP 连接、求值、事件和页面截图
 - [adb 工具插件](plugins/adb/README.md)：设备、命令、日志、截图与端口转发
+- [game-agent 小游戏插件](plugins/game-agent/README.md)：随包加载微信小游戏 Agent，通过对象句柄读写属性、调用方法及收集 console 日志；无需 eval，不提供 CDP 断点
 - [应用启动诊断](plugins/chrome-devtools/examples/diagnose_app.py)：先看 ADB 启动日志，再限时探测 DevTools
 - [效果插件调用示例](plugins/effects/examples/basic.py)；设备工具用法见各插件 README。
 
@@ -176,6 +177,7 @@ Runtime 管理注册清单、会话内加载和生命周期；具体效果与外
 .\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/chrome-devtools
 .\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/adb
 .\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/usb-browser
+.\.venv\Scripts\python.exe -m ai_runtime.plugins add ./plugins/game-agent
 .\.venv\Scripts\python.exe -m ai_runtime.plugins list
 ```
 

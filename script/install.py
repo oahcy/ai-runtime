@@ -25,7 +25,7 @@ def main():
                    check=True)
     extras = 'mcp,test' if args.dev else 'mcp'
     subprocess.run([str(python), '-m', 'pip', 'install', '-e', f'.[{extras}]'], cwd=root, check=True)
-    for plugin in ('effects', 'chrome-devtools', 'adb', 'usb-browser'):
+    for plugin in ('effects', 'chrome-devtools', 'adb', 'usb-browser', 'game-agent'):
         subprocess.run([str(python), '-m', 'ai_runtime.plugins', '--data-dir', str(root / '.runtime'),
                         'add', str(root / 'plugins' / plugin)], cwd=root, check=True)
     print('Installed. Bundled plugins registered in .runtime (not loaded).')
