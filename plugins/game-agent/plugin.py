@@ -16,6 +16,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 import uvicorn
 
+PAIRING_TTL_SECONDS = 24 * 60 * 60
+
 
 class GameAgent:
     def __init__(self, context):
@@ -44,10 +46,10 @@ class GameAgent:
             raise RuntimeError('Start the listener first')
         with self.lock:
             self.token = secrets.token_urlsafe(32)
-            self.expires = time.monotonic() + 300
+            self.expires = time.monotonic() + PAIRING_TTL_SECONDS
             url = f'{self.base}/agent.js?token={self.token}'
         config = dict(url=self.base.replace('http:', 'ws:', 1) + '/ws', token=self.token)
-        return dict(url=url, expires_in=300, config=config, agent_file=str(Path(__file__).with_name('agent.js')),
+        return dict(url=url, expires_in=PAIRING_TTL_SECONDS, config=config, agent_file=str(Path(__file__).with_name('agent.js')),
                     loader="const aiAgent = require('./ai-runtime-agent.js')(" + json.dumps(config) + ");")
 
     def start(self, host='127.0.0.1', port=0):
